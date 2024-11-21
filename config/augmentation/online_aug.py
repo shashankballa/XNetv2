@@ -11,17 +11,20 @@ def data_transform_2d(size):
             A.Transpose(p=0.5),
             A.RandomRotate90(p=1),
         ],
-            additional_targets={'L': 'image', 'H': 'image'}
+            additional_targets={'L': 'image', 'H': 'image'},
+            is_check_shapes=False  # Disable shape checks
         ),
         'val': A.Compose([
             A.Resize(size[0], size[1], p=1),
         ],
-            additional_targets={'L': 'image', 'H': 'image'}
+            additional_targets={'L': 'image', 'H': 'image'},
+            is_check_shapes=False  # Disable shape checks
         ),
         'test': A.Compose([
             A.Resize(size[0], size[1], p=1),
         ],
-            additional_targets={'L': 'image', 'H': 'image'}
+            additional_targets={'L': 'image', 'H': 'image'},
+            is_check_shapes=False  # Disable shape checks
         )
     }
     return data_transforms

@@ -78,6 +78,21 @@ def dataset_cfg(dataet_name):
                 'NUM_SAMPLE_VAL': 12,
                 'QUEUE_LENGTH': 48
             },
+        'GLAS':
+            {
+                'PATH_DATASET': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/dataset_tiff/GLAS',
+                'PATH_TRAINED_MODEL': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/checkpoints',
+                'PATH_SEG_RESULT': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/seg_pred',
+                'IN_CHANNELS': 3,
+                'NUM_CLASSES': 2,
+                'MEAN': [0.787803, 0.512017, 0.784938],
+                'STD': [0.428206, 0.507778, 0.426366],
+                'INPUT_SIZE': (128, 128),
+                'PALETTE': list(np.array([
+                    [0, 0, 0],
+                    [255, 255, 255],
+                ]).flatten())
+            },
     }
 
     return config[dataet_name]
