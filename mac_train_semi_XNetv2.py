@@ -34,7 +34,7 @@ def init_seeds(seed):
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name', default='GlaS', help='CREMI, GlaS, ISIC-2017')
+    parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
     parser.add_argument('--sup_mark', default='20')
     parser.add_argument('--unsup_mark', default='80')
     parser.add_argument('-b', '--batch_size', default=16, type=int)
@@ -57,7 +57,11 @@ if __name__ == '__main__':
     parser.add_argument('--rank_index', default=0, help='0, 1, 2, 3')
     parser.add_argument('-v', '--vis', default=False, help='need visualization or not')
     parser.add_argument('--visdom_port', default=16672)
+    parser.add_argument('--show_args', default=True, help='show the arguments or not')
     args = parser.parse_args()
+
+    if args.show_args:
+        print(args)
 
     # Set device to MPS or CPU
     device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
@@ -182,6 +186,10 @@ if __name__ == '__main__':
             max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
             loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
                                criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
+            
+            # print('pred_train_unsup1:', pred_train_unsup1.size())
+            # print('pred_train_unsup2:', pred_train_unsup2.size())
+            # print('pred_train_unsup3:', pred_train_unsup3.size())
 
             loss_train_unsup = loss_train_unsup * unsup_weight
             loss_train_unsup.backward(retain_graph=True)
@@ -192,20 +200,10 @@ if __name__ == '__main__':
             img_train_sup2 = Variable(sup_index['L'].to(device))
             img_train_sup3 = Variable(sup_index['H'].to(device))
             mask_train_sup = Variable(sup_index['mask'].to(device))
-
-            # plot the first image and mask using Image library
-            if i == 0:
-                print('img_train_sup1:', img_train_sup1.size())
-                # Image.fromarray(mask_train_sup[0, :, :].cpu().numpy()).show()
-                print('mask_train_sup:', mask_train_sup.size())
-                # check datatype of mask_train_sup
-                print('mask_train_sup:', mask_train_sup.dtype)
-                # check unique values in mask_train_sup
-                print('mask_train_sup:', torch.unique(mask_train_sup))
-
-
-            # mask_train_sup = torch.nn.functional.one_hot(mask_train_sup, 
-            #                             num_classes=cfg['NUM_CLASSES']).permute(0, 3, 1, 2).float()
+            bin_mask_train_sup = mask_train_sup
+            bin_mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
+            # bin_mask_train_sup = torch.nn.functional.one_hot(torch.clamp_min(bin_mask_train_sup, 0)
+            #     , num_classes=cfg['NUM_CLASSES']).permute(0, 3, 1, 2)
 
             pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup1, img_train_sup2, img_train_sup3)
 
@@ -217,15 +215,23 @@ if __name__ == '__main__':
                     score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
 
-            # Check shapes of the output and the target
-            if pred_train_sup1.size() != mask_train_sup.size():
-                print('output size:', pred_train_sup1.size())
-                print('target size:', mask_train_sup.size())
-                # raise ValueError('Output and target have different shapes.')
+            # # Check shapes of the output and the target
+            # if pred_train_sup1.size() != mask_train_sup.size():
+            #     print('Pred size:', pred_train_sup1.size())
 
-            loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
-            loss_train_sup2 = criterion(pred_train_sup2, mask_train_sup)
-            loss_train_sup3 = criterion(pred_train_sup3, mask_train_sup)
+            #     # print a small part of the output and the target
+            #     print('Pred:', pred_train_sup1[0, :, 0:4, 0:4])
+            #     print('Mask:', bin_mask_train_sup[0, 0:4, 0:4])
+
+            #     print('Mask size:', bin_mask_train_sup.size())
+            #     unique_elements, counts = torch.unique(bin_mask_train_sup, return_counts=True)
+            #     print("Unique elements:", unique_elements)
+            #     print("Counts:", counts)
+            #     # raise ValueError('Output and target have different shapes.')
+
+            loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
+            loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
+            loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
             loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3
             loss_train_sup.backward()
 

@@ -91,6 +91,8 @@ class DiceLoss(nn.Module):
 
         for i in range(target.shape[-1]):
             if i != self.ignore_index:
+                # print('DiceLoss_base_forward|predict[:, %d]: ' % i, predict[:, i].shape)
+                # print('DiceLoss_base_forward|target[..., %d]: ' % i, target[..., i].shape)
                 dice_loss = dice(predict[:, i], target[..., i], valid_mask)
                 if self.weight is not None:
                     assert self.weight.shape[0] == target.shape[1], \
@@ -118,6 +120,9 @@ class DiceLoss(nn.Module):
         else:
             valid_mask = (target != self.ignore_index).long()
             target_one_hot = F.one_hot(torch.clamp_min(target, 0))
+            # print('DiceLossforward|output  : ', output.shape)
+            # print('DiceLossforward|target  : ', target.shape)
+            # print('DiceLossforward|tgt_1hot: ', target_one_hot.shape)
             return self._base_forward(output, target_one_hot, valid_mask)
 
 

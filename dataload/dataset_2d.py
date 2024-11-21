@@ -99,7 +99,13 @@ class dataset_XNetv2(Dataset):
             H = normalize_1['H']
             mask_1 = normalize_1['mask'].long()
 
-            sampel = {'image': img_1, 'mask': mask_1, 'L': L, 'H': H, 'ID': os.path.split(mask_path)[1]}
+            bin_mask = torch.zeros_like(mask_1, dtype=torch.bool)
+            bin_mask[mask_1 > 0] = True
+
+            sampel = {
+                'image': img_1, 'mask': mask_1, 'L': L, 'H': H, 'ID': os.path.split(mask_path)[1]
+                , 'bin_mask': bin_mask
+                }
 
         else:
             augment_1 = self.augmentation_1(image=img_1, L=L, H=H)
