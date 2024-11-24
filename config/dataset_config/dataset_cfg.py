@@ -1,5 +1,12 @@
 import numpy as np
 import torchio as tio
+import os
+
+# get current directory
+current_dir = os.path.dirname(os.path.realpath(__file__))
+# got 2 directories up
+current_dir = os.path.dirname(os.path.dirname(current_dir))
+print(current_dir)
 
 def dataset_cfg(dataet_name):
 
@@ -80,9 +87,9 @@ def dataset_cfg(dataet_name):
             },
         'GLAS':
             {
-                'PATH_DATASET': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/dataset_tiff/GLAS',
-                'PATH_TRAINED_MODEL': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/checkpoints',
-                'PATH_SEG_RESULT': '/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/seg_pred',
+                'PATH_DATASET': current_dir + '/dataset_tiff/GLAS',
+                'PATH_TRAINED_MODEL': current_dir + '/dataset_tiff/GLAS',
+                'PATH_SEG_RESULT': current_dir + '/dataset_tiff/GLAS',
                 'IN_CHANNELS': 3,
                 'NUM_CLASSES': 2,
                 'MEAN': [0.787803, 0.512017, 0.784938],

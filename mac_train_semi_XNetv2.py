@@ -202,7 +202,7 @@ if __name__ == '__main__':
 
             pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup1, img_train_sup2, img_train_sup3)
 
-            if count_iter % args.display_iter == 0:
+            if (count_iter % args.display_iter == 0) or args.vis:
                 if i == 0:
                     score_list_train1 = pred_train_sup1
                     mask_list_train = mask_train_sup
@@ -228,7 +228,7 @@ if __name__ == '__main__':
         scheduler_warmup1.step()
 
         # Visualization and printing training statistics
-        if count_iter % args.display_iter == 0:
+        if (count_iter % args.display_iter == 0) or args.vis:
             print('=' * print_num)
             print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' ') + '|')
             train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_epoch_loss = print_train_loss_XNetv2(
@@ -272,7 +272,7 @@ if __name__ == '__main__':
             val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3 = print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_batches, print_num, print_num_minus)
             val_eval_list1, val_m_jc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
             best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, path_trained_models, path_seg_results, cfg['PALETTE'], 'XNetv2')
-            if args.vis:
+            if args.vis:                
                 draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
                 visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)
                 visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
