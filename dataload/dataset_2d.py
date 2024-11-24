@@ -86,6 +86,7 @@ class dataset_XNetv2(Dataset):
             mask_path = self.mask_paths[index]
             mask = Image.open(mask_path)
             mask = np.array(mask)
+            
 
             augment_1 = self.augmentation_1(image=img_1, mask=mask, L=L, H=H)
             img_1 = augment_1['image']
@@ -126,7 +127,7 @@ class dataset_XNetv2(Dataset):
         return len(self.img_paths_1)
 
 
-def imagefloder_XNetv2(data_dir, data_transform_1, data_normalize_1, wavelet_type, alpha, beta, sup=True, num_images=None, **kwargs):
+def imagefolder_XNetv2(data_dir, data_transform_1, data_normalize_1, wavelet_type, alpha, beta, sup=True, num_images=None, **kwargs):
     dataset = dataset_XNetv2(data_dir=data_dir,
                           augmentation_1=data_transform_1,
                           normalize_1=data_normalize_1,

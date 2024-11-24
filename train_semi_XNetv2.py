@@ -21,7 +21,7 @@ from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from loss.loss_function import segmentation_loss
 from models.getnetwork import get_network
-from dataload.dataset_2d import imagefloder_XNetv2
+from dataload.dataset_2d import imagefolder_XNetv2
 from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, visualization_XNetv2, visual_image_sup
 from config.warmup_config.warmup import GradualWarmupScheduler
 from config.train_test_config.train_test_config import print_train_loss_XNetv2, print_val_loss_XNetv2, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
@@ -108,7 +108,7 @@ if __name__ == '__main__':
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
 
-    dataset_train_unsup = imagefloder_XNetv2(
+    dataset_train_unsup = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/train_unsup_' + args.unsup_mark,
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
@@ -120,7 +120,7 @@ if __name__ == '__main__':
     )
     num_images_unsup = len(dataset_train_unsup)
 
-    dataset_train_sup = imagefloder_XNetv2(
+    dataset_train_sup = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/train_sup_' + args.sup_mark,
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
@@ -130,7 +130,7 @@ if __name__ == '__main__':
         sup=True,
         num_images=num_images_unsup,
     )
-    dataset_val = imagefloder_XNetv2(
+    dataset_val = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
         data_normalize_1=data_normalize,
@@ -227,7 +227,6 @@ if __name__ == '__main__':
                 if i == 0:
                     score_list_train1 = pred_train_sup1
                     mask_list_train = mask_train_sup
-                # else:
                 elif 0 < i <= num_batches['train_sup'] / 64:
                     score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)

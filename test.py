@@ -14,7 +14,7 @@ from torch.nn.parallel import DistributedDataParallel
 from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from models.getnetwork import get_network
-from dataload.dataset_2d import imagefloder_XNetv2
+from dataload.dataset_2d import imagefolder_XNetv2
 from config.train_test_config.train_test_config import print_test_eval, save_test_2d
 from warnings import simplefilter
 simplefilter(action='ignore', category=FutureWarning)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
 
-    dataset_val = imagefloder_XNetv2(
+    dataset_val = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
         data_normalize_1=data_normalize,

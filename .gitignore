@@ -4,3 +4,5 @@ __pycache__/
 checkpoints/
 .idea/
 pyenv/
+seg_pred/
+data/

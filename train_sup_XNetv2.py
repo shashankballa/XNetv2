@@ -21,7 +21,7 @@ from config.warmup_config.warmup import GradualWarmupScheduler
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from loss.loss_function import segmentation_loss
 from models.getnetwork import get_network
-from dataload.dataset_2d import imagefloder_XNetv2
+from dataload.dataset_2d import imagefolder_XNetv2
 from warnings import simplefilter
 
 simplefilter(action='ignore', category=FutureWarning)
@@ -101,7 +101,7 @@ if __name__ == '__main__':
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
 
-    dataset_train = imagefloder_XNetv2(
+    dataset_train = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/train_sup_' + args.sup_mark,
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
@@ -111,7 +111,7 @@ if __name__ == '__main__':
         sup=True,
         num_images=None,
     )
-    dataset_val = imagefloder_XNetv2(
+    dataset_val = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
         data_normalize_1=data_normalize,

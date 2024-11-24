@@ -15,7 +15,7 @@ from PIL import Image
 from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from loss.loss_function import segmentation_loss
-from dataload.dataset_2d import imagefloder_XNetv2
+from dataload.dataset_2d import imagefolder_XNetv2
 from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, visualization_XNetv2, visual_image_sup
 from config.warmup_config.warmup import GradualWarmupScheduler
 from config.train_test_config.train_test_config import print_train_loss_XNetv2, print_val_loss_XNetv2, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
@@ -50,14 +50,15 @@ if __name__ == '__main__':
     parser.add_argument('--wavelet_type', default='haar', help='haar, db2, bior1.5, coif1, dmey')
     parser.add_argument('--alpha', default=[0, 0.4])
     parser.add_argument('--beta', default=[0.5, 0.8])
-
     parser.add_argument('-i', '--display_iter', default=5, type=int)
     parser.add_argument('-n', '--network', default='XNetv2', type=str)
     parser.add_argument('--local_rank', default=-1, type=int)
     parser.add_argument('--rank_index', default=0, help='0, 1, 2, 3')
-    parser.add_argument('-v', '--vis', default=False, help='need visualization or not')
+    parser.add_argument('-v', '--vis', default=True, help='need visualization or not')
     parser.add_argument('--visdom_port', default=16672)
     parser.add_argument('--show_args', default=True, help='show the arguments or not')
+    parser.add_argument('--use_pretrained', action='store_true', default=False,
+                        help='Use a pretrained model if available')
     args = parser.parse_args()
 
     if args.show_args:
@@ -96,7 +97,7 @@ if __name__ == '__main__':
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
 
-    dataset_train_unsup = imagefloder_XNetv2(
+    dataset_train_unsup = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/train_unsup_' + args.unsup_mark,
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
@@ -108,7 +109,7 @@ if __name__ == '__main__':
     )
     num_images_unsup = len(dataset_train_unsup)
 
-    dataset_train_sup = imagefloder_XNetv2(
+    dataset_train_sup = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/train_sup_' + args.sup_mark,
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
@@ -118,7 +119,7 @@ if __name__ == '__main__':
         sup=True,
         num_images=num_images_unsup,
     )
-    dataset_val = imagefloder_XNetv2(
+    dataset_val = imagefolder_XNetv2(
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
         data_normalize_1=data_normalize,
@@ -130,13 +131,14 @@ if __name__ == '__main__':
     )
 
     dataloaders = dict()
-    dataloaders['train_sup'] = DataLoader(dataset_train_sup, batch_size=args.batch_size, shuffle=True, num_workers=8)
-    dataloaders['train_unsup'] = DataLoader(dataset_train_unsup, batch_size=args.batch_size, shuffle=True, num_workers=8)
-    dataloaders['val'] = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False, num_workers=8)
+    dataloaders['train_sup'] = DataLoader(dataset_train_sup, batch_size=args.batch_size, shuffle=True)#, num_workers=8)
+    dataloaders['train_unsup'] = DataLoader(dataset_train_unsup, batch_size=args.batch_size, shuffle=True)#, num_workers=8)
+    dataloaders['val'] = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False)#, num_workers=8)
 
     num_batches = {'train_sup': len(dataloaders['train_sup']), 'train_unsup': len(dataloaders['train_unsup']), 'val': len(dataloaders['val'])}
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES']).to(device)
+
     criterion = segmentation_loss(args.loss, False).to(device)
 
     optimizer1 = optim.SGD(model1.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5 * 10 ** args.wd)
@@ -151,6 +153,7 @@ if __name__ == '__main__':
     best_val_eval_list = [0 for i in range(4)]
 
     for epoch in range(args.num_epochs):
+
         count_iter += 1
         if (count_iter - 1) % args.display_iter == 0:
             begin_time = time.time()
@@ -187,23 +190,15 @@ if __name__ == '__main__':
             loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
                                criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
             
-            # print('pred_train_unsup1:', pred_train_unsup1.size())
-            # print('pred_train_unsup2:', pred_train_unsup2.size())
-            # print('pred_train_unsup3:', pred_train_unsup3.size())
-
             loss_train_unsup = loss_train_unsup * unsup_weight
             loss_train_unsup.backward(retain_graph=True)
-
 
             sup_index = next(dataset_train_sup)
             img_train_sup1 = Variable(sup_index['image'].to(device))
             img_train_sup2 = Variable(sup_index['L'].to(device))
             img_train_sup3 = Variable(sup_index['H'].to(device))
             mask_train_sup = Variable(sup_index['mask'].to(device))
-            bin_mask_train_sup = mask_train_sup
             bin_mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
-            # bin_mask_train_sup = torch.nn.functional.one_hot(torch.clamp_min(bin_mask_train_sup, 0)
-            #     , num_classes=cfg['NUM_CLASSES']).permute(0, 3, 1, 2)
 
             pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup1, img_train_sup2, img_train_sup3)
 
@@ -215,20 +210,6 @@ if __name__ == '__main__':
                     score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
 
-            # # Check shapes of the output and the target
-            # if pred_train_sup1.size() != mask_train_sup.size():
-            #     print('Pred size:', pred_train_sup1.size())
-
-            #     # print a small part of the output and the target
-            #     print('Pred:', pred_train_sup1[0, :, 0:4, 0:4])
-            #     print('Mask:', bin_mask_train_sup[0, 0:4, 0:4])
-
-            #     print('Mask size:', bin_mask_train_sup.size())
-            #     unique_elements, counts = torch.unique(bin_mask_train_sup, return_counts=True)
-            #     print("Unique elements:", unique_elements)
-            #     print("Counts:", counts)
-            #     # raise ValueError('Output and target have different shapes.')
-
             loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
             loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
             loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
@@ -236,7 +217,6 @@ if __name__ == '__main__':
             loss_train_sup.backward()
 
             optimizer1.step()
-
 
             loss_train = loss_train_unsup + loss_train_sup
             train_loss_unsup += loss_train_unsup.item()
@@ -257,51 +237,55 @@ if __name__ == '__main__':
             train_eval_list1, train_m_jc1 = print_train_eval_sup(
                 cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus
             )
-
         
-    # Validation loop
-    with torch.no_grad():
-        model1.eval()
-        for i, data in enumerate(dataloaders['val']):
-            inputs_val1 = Variable(data['image'].to(device))
-            inputs_val2 = Variable(data['L'].to(device))
-            inputs_val3 = Variable(data['H'].to(device))
-            mask_val = Variable(data['mask'].to(device))
-            name_val = data['ID']
+        # Validation loop
+        with torch.no_grad():
+            model1.eval()
+            for i, data in enumerate(dataloaders['val']):
 
-            outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1, inputs_val2, inputs_val3)
+                inputs_val1 = Variable(data['image'].to(device))
+                inputs_val2 = Variable(data['L'].to(device))
+                inputs_val3 = Variable(data['H'].to(device))
+                mask_val = Variable(data['mask'].to(device))
+                bin_mask_val = Variable(data['bin_mask'].to(device).long())
+                name_val = data['ID']
 
-            if i == 0:
-                score_list_val1 = outputs_val1
-                mask_list_val = mask_val
-                name_list_val = name_val
-            else:
-                score_list_val1 = torch.cat((score_list_val1, outputs_val1), dim=0)
-                mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
-                name_list_val = np.append(name_list_val, name_val, axis=0)
+                optimizer1.zero_grad()
+                outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1, inputs_val2, inputs_val3)
 
-            loss_val_sup1 = criterion(outputs_val1, mask_val)
-            loss_val_sup2 = criterion(outputs_val2, mask_val)
-            loss_val_sup3 = criterion(outputs_val3, mask_val)
-            val_loss_sup_1 += loss_val_sup1.item()
-            val_loss_sup_2 += loss_val_sup2.item()
-            val_loss_sup_3 += loss_val_sup3.item()
+                if i == 0:
+                    score_list_val1 = outputs_val1
+                    mask_list_val = mask_val
+                    name_list_val = name_val
+                else:
+                    score_list_val1 = torch.cat((score_list_val1, outputs_val1), dim=0)
+                    mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
+                    name_list_val = np.append(name_list_val, name_val, axis=0)
 
-        if args.vis:
-            draw_img = draw_pred_sup(
-                cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, None
-            )
-            visualization_XNetv2(
-                visdom,
-                epoch + 1,
-                train_epoch_loss,
-                train_epoch_loss_sup1,
-                train_epoch_loss_sup2,
-                train_epoch_loss_sup3,
-                train_epoch_loss_unsup,
-                train_m_jc1,
-                val_loss_sup_1,
-                val_loss_sup_2,
-                val_loss_sup_3,
-                None,
-            )
+                loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
+                loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
+                loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
+                val_loss_sup_1 += loss_val_sup1.item()
+                val_loss_sup_2 += loss_val_sup2.item()
+                val_loss_sup_3 += loss_val_sup3.item()
+
+            val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3 = print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_batches, print_num, print_num_minus)
+            val_eval_list1, val_m_jc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
+            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, path_trained_models, path_seg_results, cfg['PALETTE'], 'XNetv2')
+            if args.vis:
+                draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
+                visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)
+                visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
+            print('-' * print_num)
+            print('| Epoch Time: {:.4f}s'.format((time.time() - begin_time) / args.display_iter).ljust(
+                    print_num_minus, ' '), '|')
+    
+    time_elapsed = time.time() - since
+    m, s = divmod(time_elapsed, 60)
+    h, m = divmod(m, 60)
+
+    print('=' * print_num)
+    print('| Training Completed In {:.0f}h {:.0f}mins {:.0f}s'.format(h, m, s).ljust(print_num_minus, ' '), '|')
+    print('-' * print_num)
+    print_best_sup(cfg['NUM_CLASSES'], best_val_eval_list, print_num_minus)
+    print('=' * print_num)
