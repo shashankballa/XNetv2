@@ -9,3 +9,5 @@ scipy
 SimpleITK
 torchio
 visdom
+einops
+torchsummary

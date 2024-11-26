@@ -12,6 +12,8 @@ def get_network(network, in_channels, num_classes, **kwargs):
     # 3d networks
     elif network == 'XNetv2_3D_min' or network == 'xnetv2_3d_min':
         net = xnetv2_3d_min(in_channels, num_classes)
+    elif network == 'MLWNet' or network == 'mlwnet':
+        net = mlwnet(in_channels, num_classes)
     else:
         print('the network you have entered is not supported yet')
         sys.exit()

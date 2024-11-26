@@ -20,9 +20,9 @@ from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, vis
 from config.warmup_config.warmup import GradualWarmupScheduler
 from config.train_test_config.train_test_config import print_train_loss_XNetv2, print_val_loss_XNetv2, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
 from warnings import simplefilter
+from torchsummary import summary
 
 simplefilter(action='ignore', category=FutureWarning)
-
 
 def init_seeds(seed):
     torch.manual_seed(seed)
@@ -57,8 +57,8 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--vis', default=True, help='need visualization or not')
     parser.add_argument('--visdom_port', default=16672)
     parser.add_argument('--show_args', default=True, help='show the arguments or not')
-    parser.add_argument('--use_pretrained', action='store_true', default=False,
-                        help='Use a pretrained model if available')
+    parser.add_argument('--print_net', action='store_true', default=False,
+                        help='print the network or not')
     args = parser.parse_args()
 
     if args.show_args:
@@ -139,6 +139,9 @@ if __name__ == '__main__':
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES']).to(device)
 
+    # if args.print_net:
+    #     summary(model1.cpu(), input_size=(cfg['IN_CHANNELS'], cfg['INPUT_SIZE'][0], cfg['INPUT_SIZE'][1]))
+
     criterion = segmentation_loss(args.loss, False).to(device)
 
     optimizer1 = optim.SGD(model1.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5 * 10 ** args.wd)
@@ -182,7 +185,11 @@ if __name__ == '__main__':
             img_train_unsup2 = Variable(unsup_index['L'].to(device))
             img_train_unsup3 = Variable(unsup_index['H'].to(device))
             optimizer1.zero_grad()
-            pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1, img_train_unsup2, img_train_unsup3)
+
+            if args.network == 'XNetv2':
+                pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1, img_train_unsup2, img_train_unsup3)
+            elif args.network == 'MLWNet' or args.network == 'mlwnet':
+                pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1)
 
             max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
             max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
