@@ -91,7 +91,7 @@ if __name__ == '__main__':
 
     # Visualization initialization
     if args.vis:
-        visdom_env = str('Semi-XNetv2-' + str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + '-' + str(args.sup_mark) + '-' + str(args.unsup_mark))
+        visdom_env = str('semisup-' + str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + '-' + str(args.sup_mark) + '-' + str(args.unsup_mark))
         visdom = visdom_initialization_XNetv2(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
@@ -186,17 +186,29 @@ if __name__ == '__main__':
             img_train_unsup3 = Variable(unsup_index['H'].to(device))
             optimizer1.zero_grad()
 
-            if args.network == 'XNetv2':
-                pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1, img_train_unsup2, img_train_unsup3)
-            elif args.network == 'MLWNet' or args.network == 'mlwnet':
-                pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1)
+            pred_train_unsup1, pred_train_unsup2, pred_train_unsup3, pred_train_unsup4 = model1(img_train_unsup1, img_train_unsup2, img_train_unsup3)
 
-            max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
-            max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
-            max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
-            loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
-                               criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
-            
+            if args.network == 'XNetv2':
+                max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
+                max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
+                max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
+                loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
+                                criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
+            elif args.network == 'MLWNet' or args.network == 'mlwnet':
+                max_train1 = torch.max(pred_train_unsup1, dim=1)[1].unsqueeze(1)
+                _scale = 1/2
+                max_train1_ds2 = torch.nn.functional.interpolate(max_train1, scale_factor=_scale, mode='area')
+                max_train1_ds3 = torch.nn.functional.interpolate(max_train1_ds2, scale_factor=_scale, mode='area')
+                max_train1_ds4 = torch.nn.functional.interpolate(max_train1_ds3, scale_factor=_scale, mode='area')
+                max_train1 = max_train1.squeeze(1)
+                max_train1_ds2 = max_train1_ds2.squeeze(1)
+                max_train1_ds3 = max_train1_ds3.squeeze(1)
+                max_train1_ds4 = max_train1_ds4.squeeze(1)
+
+                loss_train_unsup = criterion(pred_train_unsup1, max_train1) + criterion(pred_train_unsup2, max_train1_ds2) + \
+                                criterion(pred_train_unsup3, max_train1_ds3) + criterion(pred_train_unsup4, max_train1_ds4)
+                loss_train_unsup += model1.get_wavelet_loss()
+
             loss_train_unsup = loss_train_unsup * unsup_weight
             loss_train_unsup.backward(retain_graph=True)
 
@@ -207,7 +219,7 @@ if __name__ == '__main__':
             mask_train_sup = Variable(sup_index['mask'].to(device))
             bin_mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
 
-            pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup1, img_train_sup2, img_train_sup3)
+            pred_train_sup1, pred_train_sup2, pred_train_sup3, pred_train_unsup4 = model1(img_train_sup1, img_train_sup2, img_train_sup3)
 
             if (count_iter % args.display_iter == 0) or args.vis:
                 if i == 0:
@@ -217,10 +229,28 @@ if __name__ == '__main__':
                     score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
 
-            loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
-            loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
-            loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
-            loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3
+            if args.network == 'XNetv2':
+                loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
+                loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
+                loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
+                loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3
+            elif args.network == 'MLWNet' or args.network == 'mlwnet':
+                bin_mask_train_sup = bin_mask_train_sup.unsqueeze(1)
+                _scale = 1/2
+                bin_mask_train_sup_ds2 = torch.nn.functional.interpolate(bin_mask_train_sup, scale_factor=_scale, mode='area')
+                bin_mask_train_sup_ds3 = torch.nn.functional.interpolate(bin_mask_train_sup_ds2, scale_factor=_scale, mode='area')
+                bin_mask_train_sup_ds4 = torch.nn.functional.interpolate(bin_mask_train_sup_ds3, scale_factor=_scale, mode='area')
+                bin_mask_train_sup = bin_mask_train_sup.squeeze(1)
+                bin_mask_train_sup_ds2 = bin_mask_train_sup_ds2.squeeze(1)
+                bin_mask_train_sup_ds3 = bin_mask_train_sup_ds3.squeeze(1)
+                bin_mask_train_sup_ds4 = bin_mask_train_sup_ds4.squeeze(1)
+                loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
+                loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup_ds2)
+                loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup_ds3)
+                loss_train_sup4 = criterion(pred_train_unsup4, bin_mask_train_sup_ds4)
+                loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3 + loss_train_sup4
+                loss_train_sup += model1.get_wavelet_loss()
+
             loss_train_sup.backward()
 
             optimizer1.step()
@@ -258,7 +288,7 @@ if __name__ == '__main__':
                 name_val = data['ID']
 
                 optimizer1.zero_grad()
-                outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1, inputs_val2, inputs_val3)
+                outputs_val1, outputs_val2, outputs_val3, pred_train_unsup4 = model1(inputs_val1, inputs_val2, inputs_val3)
 
                 if i == 0:
                     score_list_val1 = outputs_val1
@@ -269,16 +299,20 @@ if __name__ == '__main__':
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
 
-                loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
-                loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
-                loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
-                val_loss_sup_1 += loss_val_sup1.item()
-                val_loss_sup_2 += loss_val_sup2.item()
-                val_loss_sup_3 += loss_val_sup3.item()
+                if args.network == 'XNetv2':
+                    loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
+                    loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
+                    loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
+                    val_loss_sup_1 += loss_val_sup1.item()
+                    val_loss_sup_2 += loss_val_sup2.item()
+                    val_loss_sup_3 += loss_val_sup3.item()
+                elif args.network == 'MLWNet' or args.network == 'mlwnet':
+                    loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
+                    val_loss_sup_1 += loss_val_sup1.item()
 
             val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3 = print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_batches, print_num, print_num_minus)
             val_eval_list1, val_m_jc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
-            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, path_trained_models, path_seg_results, cfg['PALETTE'], 'XNetv2')
+            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
             if args.vis:                
                 draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
                 visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)

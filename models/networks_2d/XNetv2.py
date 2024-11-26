@@ -224,7 +224,7 @@ class XNetv2(nn.Module):
 
         H_d1 = self.H_Conv_1x1(H_d2)
 
-        return M_d1, L_d1, H_d1
+        return M_d1, L_d1, H_d1, None
 
 def xnetv2(in_channels, num_classes):
     model = XNetv2(in_channels, num_classes)
