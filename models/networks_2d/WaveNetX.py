@@ -181,6 +181,7 @@ class WaveNetX(nn.Module):
         # main encoder
 
         x_L, (x_LH, x_HL, x_HH) = self.dwt(x_main)
+        x_H = x_HL + x_LH + x_HH
 
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
@@ -290,24 +291,27 @@ def wavenetx(in_channels, num_classes):
     return model
 
 def plot_dwt(x_dwt, idx=0):
+    _LL = torch.tensor(x_dwt[0])
+    _LH = torch.tensor(x_dwt[1][0])
+    _HL = torch.tensor(x_dwt[1][1])
+    _HH = torch.tensor(x_dwt[1][2])
     plt.figure()
     plt.subplot(2, 2, 1)
-    plt.imshow(x_dwt[0][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.imshow(_LL[idx].permute(1, 2, 0).numpy(), cmap='gray')
     plt.title('LL')
     plt.axis('off')
     plt.subplot(2, 2, 2)
-    plt.imshow(x_dwt[1][0][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.imshow(_LH[idx].permute(1, 2, 0).numpy(), cmap='gray')
     plt.title('LH')
     plt.axis('off')
     plt.subplot(2, 2, 3)
-    plt.imshow(x_dwt[1][1][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.imshow(_HL[idx].permute(1, 2, 0).numpy(), cmap='gray')
     plt.title('HL')
     plt.axis('off')
     plt.subplot(2, 2, 4)
-    plt.imshow(x_dwt[1][2][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.imshow(_HH[idx].permute(1, 2, 0).numpy(), cmap='gray')
     plt.title('HH')
     plt.axis('off')
-    plt.show()
 
 if __name__ == '__main__':
 
@@ -325,19 +329,36 @@ if __name__ == '__main__':
     rnd_h_off = torch.randint(0, h_img - crop_size + 1, (1,)).item()
     rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
     img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
-    img_gray = img_crop.mean(dim=1, keepdim=True)
+    # img_gray = img_crop.mean(dim=1, keepdim=True)
+    img_gray = img_crop
 
-    fil_len = 8
-    rand_lo = torch.rand(fil_len) - 0.5
-    unit_lo = rand_lo / rand_lo.norm()
+    # fil_len = 8
+    # rand_lo = torch.rand(fil_len) - 0.5
+    # unit_lo = rand_lo / rand_lo.norm()
+    # print('unit_lo: ', unit_lo)
+    # print('L2 norm: ', unit_lo.norm().item())  # Should be 1
+    # print('Sum: ', unit_lo.sum().item())  # Should be 1
 
-    print('unit_lo: ', unit_lo)
-    print('L2 norm: ', unit_lo.norm().item())  # Should be 1
-    print('Sum: ', unit_lo.sum().item())  # Should be 1
-
+    unit_lo = torch.tensor(pywt.Wavelet('haar').dec_lo)
     rand_dwt_layer = DWT_1lvl(unit_lo)
     img_rand_dwt = rand_dwt_layer(img_gray)
 
+    print('LL shape: ', img_rand_dwt[0].size())
+    print('LH shape: ', img_rand_dwt[1][0].size())
+    print('HL shape: ', img_rand_dwt[1][1].size())
+    print('HH shape: ', img_rand_dwt[1][2].size())
+
     plot_dwt(img_rand_dwt)
+
+    img_dwt2 = pywt.dwt2(img_gray.numpy(), 'haar', axes=(-2, -1))
+
+    print('LL shape: ', img_dwt2[0].shape)
+    print('LH shape: ', img_dwt2[1][0].shape)
+    print('HL shape: ', img_dwt2[1][1].shape)
+    print('HH shape: ', img_dwt2[1][2].shape)
+
+    plot_dwt(img_dwt2)
+
+    plt.show()
 
     exit(-1)
