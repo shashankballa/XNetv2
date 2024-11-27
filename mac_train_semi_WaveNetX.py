@@ -51,7 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--alpha', default=[0, 0.4])
     parser.add_argument('--beta', default=[0.5, 0.8])
     parser.add_argument('-i', '--display_iter', default=5, type=int)
-    parser.add_argument('-n', '--network', default='XNetv2', type=str)
+    parser.add_argument('-n', '--network', default='WaveNetX', type=str)
     parser.add_argument('--local_rank', default=-1, type=int)
     parser.add_argument('--rank_index', default=0, help='0, 1, 2, 3')
     parser.add_argument('-v', '--vis', default=True, help='need visualization or not')
@@ -208,6 +208,12 @@ if __name__ == '__main__':
                 loss_train_unsup = criterion(pred_train_unsup1, max_train1) + criterion(pred_train_unsup2, max_train1_ds2) + \
                                 criterion(pred_train_unsup3, max_train1_ds3) + criterion(pred_train_unsup4, max_train1_ds4)
                 loss_train_unsup += model1.get_wavelet_loss()
+            elif args.network == 'WaveNetX' or args.network == 'wavenetx':
+                max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
+                max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
+                max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
+                loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
+                                criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
 
             loss_train_unsup = loss_train_unsup * unsup_weight
             loss_train_unsup.backward(retain_graph=True)
@@ -250,6 +256,12 @@ if __name__ == '__main__':
                 loss_train_sup4 = criterion(pred_train_unsup4, bin_mask_train_sup_ds4)
                 loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3 + loss_train_sup4
                 loss_train_sup += model1.get_wavelet_loss()
+            if args.network.lower() == 'wavenetx':
+                loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
+                loss_train_sup2 = torch.tensor(0.0, device=pred_train_sup2.device, requires_grad=True)
+                loss_train_sup3 = torch.tensor(0.0, device=pred_train_sup3.device, requires_grad=True)
+                print("Losses:", loss_train_sup1, loss_train_sup2, loss_train_sup3)
+                loss_train_sup = loss_train_sup1
 
             loss_train_sup.backward()
 

@@ -125,9 +125,12 @@ class XNetv2(nn.Module):
 
     def forward(self, x_main, x_L, x_H):
         # main encoder
+        #test for WaveNETX due to pywt requirement for CPU, unused
+        #x_main_cpu = x_main.detach().cpu().numpy()  # Move to CPU for pywt
+        #_LL, (_LH, _HL, _HH) = pywt.dwt2(x_main_cpu, 'haar', axes=(-2, -1))
 
-        _LL, (_LH, _HL, _HH) = pywt.dwt2(x_main, 'haar', axes=(-2, -1))
-
+        print(f"x_main shape: {x_main.shape}")
+        print(f"x_L shape: {x_L.shape}, x_H shape: {x_H.shape}")
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
         M_x2 = self.M_Conv2(M_x2)

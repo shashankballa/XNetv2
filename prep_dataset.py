@@ -109,8 +109,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # Common directories for all datasets
-    dataset_base_path = "/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/dataset/"
-    processed_base_path = "/Users/shashankballa/Documents/ECE 251A/Project/XNetv2/dataset_tiff/"
+    dataset_base_path = "dataset/"
+    processed_base_path = "dataset_tiff/"
     
     # Call the organization function
     organize_dataset(args.dataset_name, dataset_base_path, processed_base_path)

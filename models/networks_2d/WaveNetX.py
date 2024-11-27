@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from typing import Sequence, Tuple, Union, List
 import pywt
 import matplotlib.pyplot as plt
 from einops import rearrange
@@ -81,10 +82,11 @@ class DWT_1lvl(nn.Module):
         dec_fil_hi = dec_fil_lo.flip(0)
         dec_fil_hi[::2] *= -1
         dec_fil_hi -= dec_fil_hi.mean()
-        dec_fil_ll = torch.unsqueeze(dec_fil_lo, dim=-1) * torch.unsqueeze(dec_fil_lo, dim=0) # outer product: lo * lo
-        dec_fil_lh = torch.unsqueeze(dec_fil_hi, dim=-1) * torch.unsqueeze(dec_fil_lo, dim=0) # outer product: hi * lo
-        dec_fil_hl = torch.unsqueeze(dec_fil_lo, dim=-1) * torch.unsqueeze(dec_fil_hi, dim=0) # outer product: lo * hi
-        dec_fil_hh = torch.unsqueeze(dec_fil_hi, dim=-1) * torch.unsqueeze(dec_fil_hi, dim=0) # outer product: hi * hi
+        # Create 2D wavelet filters using outer products
+        dec_fil_ll = torch.outer(dec_fil_lo, dec_fil_lo)  # Low x Low
+        dec_fil_lh = torch.outer(dec_fil_hi, dec_fil_lo)  # High x Low
+        dec_fil_hl = torch.outer(dec_fil_lo, dec_fil_hi)  # Low x High
+        dec_fil_hh = torch.outer(dec_fil_hi, dec_fil_hi)  # High x High
 
         dec_dwt_kernel = torch.stack([dec_fil_ll, dec_fil_lh, dec_fil_hl, dec_fil_hh], 0)
         dec_dwt_kernel = dec_dwt_kernel.repeat(c, 1, 1)
@@ -101,8 +103,12 @@ class DWT_1lvl(nn.Module):
         if w % 2 != 0:
             padl += 1
 
+        # Apply padding
+        print(_fil_len)
+        print({x.shape})
+        print(padt,padb,padl,padr)
         x_pad = F.pad(x, [padl, padr, padt, padb], mode=self.pad_mode)
-        x_dwt = F.conv2d(x_pad, dec_dwt_kernel, stride=2, groups=c)
+        x_dwt = F.conv2d(x_pad, dec_dwt_kernel.to(x_pad.device), stride=2, groups=c) #Move kernel to the same device as the input
 
         x_dwt = rearrange(x_dwt, 'b (c f) h w -> b c f h w', f=4)
         x_ll, x_lh, x_hl, x_hh = x_dwt.split(1, 2)
@@ -116,7 +122,7 @@ class WaveNetX(nn.Module):
 
         # wavelet block
         self.dwt = DWT_1lvl()
-
+    
         # main network
         self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.M_Conv1 = conv_block(ch_in=in_channels, ch_out=64)
@@ -177,11 +183,19 @@ class WaveNetX(nn.Module):
         self.M_L_Conv3 = conv_block(ch_in=512, ch_out=256)
         self.M_L_Conv4 = conv_block(ch_in=1024, ch_out=512)
 
-    def forward(self, x_main):
+    def forward(self, x_main, *args, **kwargs): #ignore excess
         # main encoder
 
         x_L, (x_LH, x_HL, x_HH) = self.dwt(x_main)
         x_H = x_HL + x_LH + x_HH
+
+        # Resize x_L and x_H to match the spatial dimensions of x_main
+        x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+
+        print(f"x_main shape: {x_main.shape}")
+        print(f"x_L shape: {x_L.shape}, x_H shape: {x_H.shape}")
+
 
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
@@ -216,6 +230,7 @@ class WaveNetX(nn.Module):
         H_x5 = self.H_Conv5(H_x5)
 
         # fusion
+        print(f"M_x1 shape: {M_x1.shape}, H_x1 shape: {H_x1.shape}")
         M_H_x1 = torch.cat((M_x1, H_x1), dim=1)
         M_H_x1 = self.M_H_Conv1(M_H_x1)
         M_H_x2 = torch.cat((M_x2, H_x2), dim=1)
