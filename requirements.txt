@@ -11,3 +11,4 @@ torchio
 visdom
 einops
 torchsummary
+matplotlib

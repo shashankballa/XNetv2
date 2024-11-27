@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pywt
+import matplotlib.pyplot as plt
+from einops import rearrange
 from torch.nn import init
 
 def init_weights(net, init_type='normal', gain=0.02):
@@ -59,9 +61,61 @@ class up_conv(nn.Module):
         return x
 
 
-class XNetv2(nn.Module):
+class DWT_1lvl(nn.Module):
+    def __init__(self, dec_lo = None, fil_len = 8, pad_mode="replicate"):
+
+        super(DWT_1lvl, self).__init__()
+
+        if dec_lo is None:
+            dec_lo = torch.rand(fil_len) - 0.5
+            dec_lo = dec_lo / dec_lo.norm()
+
+        self.dec_lo = dec_lo
+        self.pad_mode = pad_mode
+
+    def forward(self, x):
+
+        b, c, h, w = x.shape
+
+        dec_fil_lo = torch.reshape(self.dec_lo, [-1])
+        dec_fil_hi = dec_fil_lo.flip(0)
+        dec_fil_hi[::2] *= -1
+        dec_fil_hi -= dec_fil_hi.mean()
+        dec_fil_ll = torch.unsqueeze(dec_fil_lo, dim=-1) * torch.unsqueeze(dec_fil_lo, dim=0) # outer product: lo * lo
+        dec_fil_lh = torch.unsqueeze(dec_fil_hi, dim=-1) * torch.unsqueeze(dec_fil_lo, dim=0) # outer product: hi * lo
+        dec_fil_hl = torch.unsqueeze(dec_fil_lo, dim=-1) * torch.unsqueeze(dec_fil_hi, dim=0) # outer product: lo * hi
+        dec_fil_hh = torch.unsqueeze(dec_fil_hi, dim=-1) * torch.unsqueeze(dec_fil_hi, dim=0) # outer product: hi * hi
+
+        dec_dwt_kernel = torch.stack([dec_fil_ll, dec_fil_lh, dec_fil_hl, dec_fil_hh], 0)
+        dec_dwt_kernel = dec_dwt_kernel.repeat(c, 1, 1)
+        dec_dwt_kernel = dec_dwt_kernel.unsqueeze(dim=1)
+
+        _fil_len = len(self.dec_lo)
+
+        padb = (2 * _fil_len - 3) // 2
+        padt = (2 * _fil_len - 3) // 2
+        if h % 2 != 0:
+            padb += 1
+        padr = (2 * _fil_len - 3) // 2
+        padl = (2 * _fil_len - 3) // 2
+        if w % 2 != 0:
+            padl += 1
+
+        x_pad = F.pad(x, [padl, padr, padt, padb], mode=self.pad_mode)
+        x_dwt = F.conv2d(x_pad, dec_dwt_kernel, stride=2, groups=c)
+
+        x_dwt = rearrange(x_dwt, 'b (c f) h w -> b c f h w', f=4)
+        x_ll, x_lh, x_hl, x_hh = x_dwt.split(1, 2)
+        x_dwt = [x_ll.squeeze(2), (x_lh.squeeze(2), x_hl.squeeze(2), x_hh.squeeze(2))]
+
+        return x_dwt
+
+class WaveNetX(nn.Module):
     def __init__(self, in_channels=3, num_classes=1):
-        super(XNetv2, self).__init__()
+        super(WaveNetX, self).__init__()
+
+        # wavelet block
+        self.dwt = DWT_1lvl()
 
         # main network
         self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -123,10 +177,10 @@ class XNetv2(nn.Module):
         self.M_L_Conv3 = conv_block(ch_in=512, ch_out=256)
         self.M_L_Conv4 = conv_block(ch_in=1024, ch_out=512)
 
-    def forward(self, x_main, x_L, x_H):
+    def forward(self, x_main):
         # main encoder
 
-        _LL, (_LH, _HL, _HH) = pywt.dwt2(x_main, 'haar', axes=(-2, -1))
+        x_L, (x_LH, x_HL, x_HH) = self.dwt(x_main)
 
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
@@ -230,19 +284,60 @@ class XNetv2(nn.Module):
 
         return M_d1, L_d1, H_d1, None
 
-def xnetv2(in_channels, num_classes):
-    model = XNetv2(in_channels, num_classes)
+def wavenetx(in_channels, num_classes):
+    model = WaveNetX(in_channels, num_classes)
     init_weights(model, 'kaiming')
     return model
 
+def plot_dwt(x_dwt, idx=0):
+    plt.figure()
+    plt.subplot(2, 2, 1)
+    plt.imshow(x_dwt[0][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.title('LL')
+    plt.axis('off')
+    plt.subplot(2, 2, 2)
+    plt.imshow(x_dwt[1][0][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.title('LH')
+    plt.axis('off')
+    plt.subplot(2, 2, 3)
+    plt.imshow(x_dwt[1][1][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.title('HL')
+    plt.axis('off')
+    plt.subplot(2, 2, 4)
+    plt.imshow(x_dwt[1][2][idx].permute(1, 2, 0).numpy(), cmap='gray')
+    plt.title('HH')
+    plt.axis('off')
+    plt.show()
 
-# if __name__ == '__main__':
-#     model = xnetv2(1,10)
-#     model.eval()
-#     input1 = torch.rand(2,1,128,128)
-#     input2 = torch.rand(2,1,128,128)
-#     input3 = torch.rand(2,1,128,128)
-#     output1, output2, output3 = model(input1, input2, input3)
-#     output1 = output1.data.cpu().numpy()
-#     # print(output)
-#     print(output1.shape)
+if __name__ == '__main__':
+
+    from PIL import Image
+    import torchvision.transforms as transforms
+    import os
+    _current_dir = os.path.dirname(os.path.abspath(__file__))
+    image_path = _current_dir+'/../../dataset/GLAS/Test Folder/img/0001.png'
+    img = Image.open(image_path)
+    img_torch = transforms.ToTensor()(img).unsqueeze(0)
+
+    print('Image size: ', img_torch.size())
+    b, c, h_img, w_img = img_torch.size()
+    crop_size = 512
+    rnd_h_off = torch.randint(0, h_img - crop_size + 1, (1,)).item()
+    rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
+    img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
+    img_gray = img_crop.mean(dim=1, keepdim=True)
+
+    fil_len = 8
+    rand_lo = torch.rand(fil_len) - 0.5
+    unit_lo = rand_lo / rand_lo.norm()
+
+    print('unit_lo: ', unit_lo)
+    print('L2 norm: ', unit_lo.norm().item())  # Should be 1
+    print('Sum: ', unit_lo.sum().item())  # Should be 1
+
+    rand_dwt_layer = DWT_1lvl(unit_lo)
+    img_rand_dwt = rand_dwt_layer(img_gray)
+
+    plot_dwt(img_rand_dwt)
+
+    exit(-1)

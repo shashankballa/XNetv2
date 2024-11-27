@@ -113,9 +113,10 @@ def get_filter_tensors(
     Returns:
         tuple: Tuple containing the four filter tensors
         dec_lo, dec_hi, rec_lo, rec_hi
-
     """
-    wavelet = _as_wavelet(wavelet)
+    # wavelet = _as_wavelet(wavelet)
+    if isinstance(wavelet, str):
+        wavelet = pywt.Wavelet(wavelet)
 
     def _create_tensor(filter: Sequence[float]) -> torch.Tensor:
         if flip:
@@ -806,6 +807,16 @@ if __name__ == '__main__':
     print(a[1].shape)
     print(a[2].shape)
     print(a[3].shape)
+
+
+
+
+    wvlet = pywt.Wavelet('')
+
+
+
+
+
     exit(-1)
 
 

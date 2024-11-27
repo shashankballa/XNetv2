@@ -64,7 +64,14 @@ class dataset_XNetv2(Dataset):
         img_1 = Image.open(img_path_1)
         img_1 = np.array(img_1)
 
+        print('img_1.shape: ', img_1.shape)
+
         LL, (LH, HL, HH) = pywt.dwt2(img_1, self.wavelet_type, axes=(0, 1))
+
+        print('LL.shape: ', LL.shape)
+        print('LH.shape: ', LH.shape)
+        print('HL.shape: ', HL.shape)
+        print('HH.shape: ', HH.shape)
 
         LL = (LL - np.amin(LL, (0, 1))) / (np.amax(LL, (0, 1)) - np.amin(LL, (0, 1))) * 255
         LH = (LH - np.amin(LH, (0, 1))) / (np.amax(LH, (0, 1)) - np.amin(LH, (0, 1))) * 255
