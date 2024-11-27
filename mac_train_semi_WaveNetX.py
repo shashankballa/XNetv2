@@ -65,7 +65,7 @@ if __name__ == '__main__':
         print(args)
 
     # Set device to MPS or CPU
-    device = torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu")
+    device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     print(f"Using device: {device}")
 
     init_seeds(42)

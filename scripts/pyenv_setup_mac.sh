@@ -11,3 +11,5 @@ else
     pyenv/bin/pip3 install -r requirements.txt --no-cache-dir
 fi
 pyenv/bin/python -c "import torch; print('Torch version:', torch.__version__); print('MPS available:', torch.backends.mps.is_available())"
+
+#windows: pip install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117 --no-cache-dir
