@@ -258,10 +258,9 @@ if __name__ == '__main__':
                 loss_train_sup += model1.get_wavelet_loss()
             if args.network.lower() == 'wavenetx':
                 loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
-                loss_train_sup2 = torch.tensor(0.0, device=pred_train_sup2.device, requires_grad=True)
-                loss_train_sup3 = torch.tensor(0.0, device=pred_train_sup3.device, requires_grad=True)
-                print("Losses:", loss_train_sup1, loss_train_sup2, loss_train_sup3)
-                loss_train_sup = loss_train_sup1
+                loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
+                loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
+                loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3
 
             loss_train_sup.backward()
 
@@ -311,7 +310,7 @@ if __name__ == '__main__':
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
 
-                if args.network == 'XNetv2':
+                if args.network.lower() == 'xnetv2' or args.network.lower() == 'wavenetx':
                     loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
                     loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
                     loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
