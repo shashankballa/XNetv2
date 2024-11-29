@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from typing import Sequence, Tuple, Union, List
 import pywt
 import matplotlib.pyplot as plt
@@ -27,7 +28,7 @@ def init_weights(net, init_type='normal', gain=0.02):
             init.normal_(m.weight.data, 1.0, gain)
             init.constant_(m.bias.data, 0.0)
 
-    print('initialize network with %s' % init_type)
+    print('initializing network with %s' % init_type)
     net.apply(init_func)
 
 class conv_block(nn.Module):
@@ -46,7 +47,6 @@ class conv_block(nn.Module):
         x = self.conv(x)
         return x
 
-
 class up_conv(nn.Module):
     def __init__(self, ch_in, ch_out):
         super(up_conv, self).__init__()
@@ -61,54 +61,74 @@ class up_conv(nn.Module):
         x = self.up(x)
         return x
 
-
 class DWT_1lvl(nn.Module):
-    def __init__(self, dec_lo = None, fil_len = 8, pad_mode="replicate"):
+
+    def __init__(self, fb_lo = None, flen = 8, nfil = 1,
+                 pad_mode="replicate"):
+        '''
+        DWT_1lvl: 1-level multi-filter DWT using 2D convolution
+        Args:
+            fb_lo: low-pass filter bank
+            flen: filter length
+            nfil: number of filters
+        '''
 
         super(DWT_1lvl, self).__init__()
 
-        if dec_lo is None:
-            dec_lo = torch.rand(fil_len) - 0.5
-            dec_lo = dec_lo / dec_lo.norm()
-
-        self.dec_lo = dec_lo
+        self.fb_lo = nn.Parameter(self.get_fb_lo(fb_lo, flen, nfil))
+        self.nfil = self.fb_lo.shape[0]
+        self.flen = self.fb_lo.shape[1]
         self.pad_mode = pad_mode
+
+    def get_fb_lo(self, fb_lo = None, flen = 8, nfil = 1):
+        if fb_lo is None:
+            fb_lo = torch.rand((nfil, flen)) - 0.5
+        else:
+            if not isinstance(fb_lo, torch.Tensor):
+                if isinstance(fb_lo, np.ndarray):
+                    fb_lo = torch.tensor(fb_lo)
+                else:
+                    raise ValueError('fb_lo should be a tensor or numpy array')
+            if fb_lo.dim() > 2:
+                raise ValueError('fb_lo should be a 1D or 2D tensor')
+            if fb_lo.dim() == 1:
+                fb_lo = fb_lo.unsqueeze(0)
+        return fb_lo
+    
+    def get_fb_conv(self, img_channels):
+        # Normalize the low-pass filters to have unit norm
+        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
+        # Generate high-pass filters by flipping and changing signs
+        fb_hi = fb_lo.flip(-1)
+        fb_hi[:, ::2] *= -1
+        fb_hi -= fb_hi.mean(dim=-1, keepdim=True)
+        # Create 2D filter banks using outer products
+        fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
+        fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
+        fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
+        fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+        # Prepare the 2D filter banks for conv2d
+        fb_conv = torch.stack([fb_ll, fb_lh, fb_hl, fb_hh], 1)
+        fb_conv = fb_conv.view(-1, fb_conv.shape[-2], fb_conv.shape[-1])
+        fb_conv = fb_conv.repeat(img_channels, 1, 1)
+        fb_conv = fb_conv.unsqueeze(dim=1)
+        return fb_conv
 
     def forward(self, x):
 
         b, c, h, w = x.shape
 
-        dec_fil_lo = torch.reshape(self.dec_lo, [-1])
-        dec_fil_hi = dec_fil_lo.flip(0)
-        dec_fil_hi[::2] *= -1
-        dec_fil_hi -= dec_fil_hi.mean()
-        # Create 2D wavelet filters using outer products
-        dec_fil_ll = torch.outer(dec_fil_lo, dec_fil_lo)  # Low x Low
-        dec_fil_lh = torch.outer(dec_fil_hi, dec_fil_lo)  # High x Low
-        dec_fil_hl = torch.outer(dec_fil_lo, dec_fil_hi)  # Low x High
-        dec_fil_hh = torch.outer(dec_fil_hi, dec_fil_hi)  # High x High
-
-        dec_dwt_kernel = torch.stack([dec_fil_ll, dec_fil_lh, dec_fil_hl, dec_fil_hh], 0)
-        dec_dwt_kernel = dec_dwt_kernel.repeat(c, 1, 1)
-        dec_dwt_kernel = dec_dwt_kernel.unsqueeze(dim=1)
-
-        _fil_len = len(self.dec_lo)
-
-        padb = (2 * _fil_len - 3) // 2
-        padt = (2 * _fil_len - 3) // 2
+        padb = (2 * self.flen - 3) // 2
+        padt = (2 * self.flen - 3) // 2
         if h % 2 != 0:
             padb += 1
-        padr = (2 * _fil_len - 3) // 2
-        padl = (2 * _fil_len - 3) // 2
+        padr = (2 * self.flen - 3) // 2
+        padl = (2 * self.flen - 3) // 2
         if w % 2 != 0:
             padl += 1
 
-        # Apply padding
-        print(_fil_len)
-        print({x.shape})
-        print(padt,padb,padl,padr)
         x_pad = F.pad(x, [padl, padr, padt, padb], mode=self.pad_mode)
-        x_dwt = F.conv2d(x_pad, dec_dwt_kernel.to(x_pad.device), stride=2, groups=c) #Move kernel to the same device as the input
+        x_dwt = F.conv2d(x_pad, self.get_fb_conv(c).to(x_pad.device), stride=2, groups=c)
 
         x_dwt = rearrange(x_dwt, 'b (c f) h w -> b c f h w', f=4)
         x_ll, x_lh, x_hl, x_hh = x_dwt.split(1, 2)
@@ -116,12 +136,19 @@ class DWT_1lvl(nn.Module):
 
         return x_dwt
 
+def get_img_dwt(img_dwt, idx=0, nfil=1):
+    img_idx_dwt = [None, None]
+    img_idx_dwt[0] = img_dwt[0][:,idx::nfil].detach().numpy()
+    img_idx_dwt[1] = [img_dwt[1][0][:,idx::nfil].detach().numpy(), img_dwt[1][1][:,idx::nfil].detach().numpy(), img_dwt[1][2][:,idx::nfil].detach().numpy()]
+    return img_idx_dwt
+
 class WaveNetX(nn.Module):
-    def __init__(self, in_channels=3, num_classes=1):
+
+    def __init__(self, in_channels=3, num_classes=1, fb_lo=None, flen=8, nfil=1):
         super(WaveNetX, self).__init__()
 
         # wavelet block
-        self.dwt = DWT_1lvl()
+        self.dwt = DWT_1lvl(fb_lo=fb_lo, flen=flen, nfil=nfil)
     
         # main network
         self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -143,7 +170,7 @@ class WaveNetX(nn.Module):
 
         # L network
         self.L_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.L_Conv1 = conv_block(ch_in=in_channels, ch_out=64)
+        self.L_Conv1 = conv_block(ch_in=nfil*in_channels, ch_out=64)
         self.L_Conv2 = conv_block(ch_in=64, ch_out=128)
         self.L_Conv3 = conv_block(ch_in=128, ch_out=256)
         self.L_Conv4 = conv_block(ch_in=256, ch_out=512)
@@ -161,7 +188,7 @@ class WaveNetX(nn.Module):
 
         # H network
         self.H_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.H_Conv1 = conv_block(ch_in=in_channels, ch_out=64)
+        self.H_Conv1 = conv_block(ch_in=nfil*in_channels, ch_out=64)
         self.H_Conv2 = conv_block(ch_in=64, ch_out=128)
         self.H_Conv3 = conv_block(ch_in=128, ch_out=256)
         self.H_Conv4 = conv_block(ch_in=256, ch_out=512)
@@ -192,10 +219,6 @@ class WaveNetX(nn.Module):
         # Resize x_L and x_H to match the spatial dimensions of x_main
         x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
         x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
-
-        print(f"x_main shape: {x_main.shape}")
-        print(f"x_L shape: {x_L.shape}, x_H shape: {x_H.shape}")
-
 
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
@@ -230,7 +253,6 @@ class WaveNetX(nn.Module):
         H_x5 = self.H_Conv5(H_x5)
 
         # fusion
-        print(f"M_x1 shape: {M_x1.shape}, H_x1 shape: {H_x1.shape}")
         M_H_x1 = torch.cat((M_x1, H_x1), dim=1)
         M_H_x1 = self.M_H_Conv1(M_H_x1)
         M_H_x2 = torch.cat((M_x2, H_x2), dim=1)
@@ -300,8 +322,8 @@ class WaveNetX(nn.Module):
 
         return M_d1, L_d1, H_d1, None
 
-def wavenetx(in_channels, num_classes):
-    model = WaveNetX(in_channels, num_classes)
+def wavenetx(in_channels, num_classes, flen=8, nfil=32):
+    model = WaveNetX(in_channels, num_classes, flen=flen, nfil=nfil)
     init_weights(model, 'kaiming')
     return model
 
@@ -345,34 +367,22 @@ if __name__ == '__main__':
     rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
     img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
     # img_gray = img_crop.mean(dim=1, keepdim=True)
-    img_gray = img_crop
 
-    # fil_len = 8
-    # rand_lo = torch.rand(fil_len) - 0.5
-    # unit_lo = rand_lo / rand_lo.norm()
-    # print('unit_lo: ', unit_lo)
-    # print('L2 norm: ', unit_lo.norm().item())  # Should be 1
-    # print('Sum: ', unit_lo.sum().item())  # Should be 1
+    flen = 8
+    rand_lo = torch.rand(flen) - 0.5
+    unit_lo = rand_lo / rand_lo.norm()
+    print('unit_lo: ', unit_lo)
+    print('L2 norm: ', unit_lo.norm().item())  # Should be 1
+    print('Sum: ', unit_lo.sum().item())  # Should be 1
+    # unit_lo = torch.tensor(pywt.Wavelet('haar').dwt_lo)
 
-    unit_lo = torch.tensor(pywt.Wavelet('haar').dec_lo)
-    rand_dwt_layer = DWT_1lvl(unit_lo)
-    img_rand_dwt = rand_dwt_layer(img_gray)
+    nfil = 16
+    rand_dwt_layer = DWT_1lvl(nfil=nfil)
+    img_rand_dwt = rand_dwt_layer(img_crop)
 
-    print('LL shape: ', img_rand_dwt[0].size())
-    print('LH shape: ', img_rand_dwt[1][0].size())
-    print('HL shape: ', img_rand_dwt[1][1].size())
-    print('HH shape: ', img_rand_dwt[1][2].size())
-
-    plot_dwt(img_rand_dwt)
-
-    img_dwt2 = pywt.dwt2(img_gray.numpy(), 'haar', axes=(-2, -1))
-
-    print('LL shape: ', img_dwt2[0].shape)
-    print('LH shape: ', img_dwt2[1][0].shape)
-    print('HL shape: ', img_dwt2[1][1].shape)
-    print('HH shape: ', img_dwt2[1][2].shape)
-
-    plot_dwt(img_dwt2)
+    for idx in range(nfil):
+        img_idx_dwt = get_img_dwt(img_rand_dwt, idx=idx, nfil=nfil)
+        plot_dwt(img_idx_dwt)
 
     plt.show()
 

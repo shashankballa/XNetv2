@@ -6,3 +6,4 @@ checkpoints/
 pyenv/
 seg_pred/
 data/
+.DS_Store

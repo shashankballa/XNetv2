@@ -64,14 +64,7 @@ class dataset_XNetv2(Dataset):
         img_1 = Image.open(img_path_1)
         img_1 = np.array(img_1)
 
-        print('img_1.shape: ', img_1.shape)
-
         LL, (LH, HL, HH) = pywt.dwt2(img_1, self.wavelet_type, axes=(0, 1))
-
-        print('LL.shape: ', LL.shape)
-        print('LH.shape: ', LH.shape)
-        print('HL.shape: ', HL.shape)
-        print('HH.shape: ', HH.shape)
 
         LL = (LL - np.amin(LL, (0, 1))) / (np.amax(LL, (0, 1)) - np.amin(LL, (0, 1))) * 255
         LH = (LH - np.amin(LH, (0, 1))) / (np.amax(LH, (0, 1)) - np.amin(LH, (0, 1))) * 255
@@ -145,3 +138,94 @@ def imagefolder_XNetv2(data_dir, data_transform_1, data_normalize_1, wavelet_typ
                           num_images=num_images,
                            **kwargs)
     return dataset
+
+
+class dataset_WaveNetX(Dataset):
+    def __init__(self, data_dir, augmentation_1, normalize_1, wavelet_type, alpha, beta, sup=True, num_images=None, **kwargs):
+        super(dataset_WaveNetX, self).__init__()
+
+        img_paths_1 = []
+        mask_paths = []
+
+        image_dir_1 = data_dir + '/image'
+        if sup:
+            mask_dir = data_dir + '/mask'
+
+        for image in os.listdir(image_dir_1):
+
+            image_path_1 = os.path.join(image_dir_1, image)
+            img_paths_1.append(image_path_1)
+
+            if sup:
+                mask_path = os.path.join(mask_dir, image)
+                mask_paths.append(mask_path)
+
+        if sup:
+            assert len(img_paths_1) == len(mask_paths)
+
+        if num_images is not None:
+            len_img_paths = len(img_paths_1)
+            quotient = num_images // len_img_paths
+            remainder = num_images % len_img_paths
+
+            if num_images <= len_img_paths:
+                img_paths_1 = img_paths_1[:num_images]
+            else:
+                rand_indices = torch.randperm(len_img_paths).tolist()
+                new_indices = rand_indices[:remainder]
+
+                img_paths_1 = img_paths_1 * quotient
+                img_paths_1 += [img_paths_1[i] for i in new_indices]
+
+                if sup:
+                    mask_paths = mask_paths * quotient
+                    mask_paths += [mask_paths[i] for i in new_indices]
+
+        self.img_paths_1 = img_paths_1
+        self.mask_paths = mask_paths
+        self.augmentation_1 = augmentation_1
+        self.normalize_1 = normalize_1
+        self.sup = sup
+        self.kwargs = kwargs
+
+    def __getitem__(self, index):
+
+        img_path_1 = self.img_paths_1[index]
+        img_1 = Image.open(img_path_1)
+        img_1 = np.array(img_1)
+
+        if self.sup:
+            mask_path = self.mask_paths[index]
+            mask = Image.open(mask_path)
+            mask = np.array(mask)
+            
+
+            augment_1 = self.augmentation_1(image=img_1, mask=mask)
+            img_1 = augment_1['image']
+            mask_1 = augment_1['mask']
+
+            normalize_1 = self.normalize_1(image=img_1, mask=mask_1)
+            img_1 = normalize_1['image']
+            mask_1 = normalize_1['mask'].long()
+
+            bin_mask = torch.zeros_like(mask_1, dtype=torch.bool)
+            bin_mask[mask_1 > 0] = True
+
+            sampel = {
+                'image': img_1, 'mask': mask_1, 'ID': os.path.split(mask_path)[1]
+                , 'bin_mask': bin_mask
+                }
+
+        else:
+            augment_1 = self.augmentation_1(image=img_1)
+            img_1 = augment_1['image']
+
+            normalize_1 = self.normalize_1(image=img_1)
+            img_1 = normalize_1['image']
+
+            sampel = {'image': img_1, 'ID': os.path.split(img_path_1)[1]}
+
+        return sampel
+
+    def __len__(self):
+        return len(self.img_paths_1)
