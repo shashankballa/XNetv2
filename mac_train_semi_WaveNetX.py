@@ -37,7 +37,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
     parser.add_argument('--sup_mark', default='20')
     parser.add_argument('--unsup_mark', default='80')
-    parser.add_argument('-b', '--batch_size', default=4, type=int) #default 16 but my ram can't take it
+    parser.add_argument('-b', '--batch_size', default=16, type=int) #default 16 but my ram can't take it
     parser.add_argument('-e', '--num_epochs', default=200, type=int)
     parser.add_argument('-s', '--step_size', default=50, type=int)
     parser.add_argument('-l', '--lr', default=0.5, type=float)
@@ -208,7 +208,7 @@ if __name__ == '__main__':
                 loss_train_unsup = criterion(pred_train_unsup1, max_train1) + criterion(pred_train_unsup2, max_train1_ds2) + \
                                 criterion(pred_train_unsup3, max_train1_ds3) + criterion(pred_train_unsup4, max_train1_ds4)
                 loss_train_unsup += model1.get_wavelet_loss()
-            elif args.network == 'WaveNetX' or args.network == 'wavenetx':
+            elif args.network == 'WaveNetX' or args.network == 'wavenetx'  or args.network.lower() == 'wavenetx2':
                 max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
                 max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
                 max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
@@ -256,7 +256,7 @@ if __name__ == '__main__':
                 loss_train_sup4 = criterion(pred_train_unsup4, bin_mask_train_sup_ds4)
                 loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3 + loss_train_sup4
                 loss_train_sup += model1.get_wavelet_loss()
-            if args.network.lower() == 'wavenetx':
+            if args.network.lower() == 'wavenetx'  or args.network.lower() == 'wavenetx2':
                 loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup)
                 loss_train_sup2 = criterion(pred_train_sup2, bin_mask_train_sup)
                 loss_train_sup3 = criterion(pred_train_sup3, bin_mask_train_sup)
@@ -310,7 +310,7 @@ if __name__ == '__main__':
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
 
-                if args.network.lower() == 'xnetv2' or args.network.lower() == 'wavenetx':
+                if args.network.lower() == 'xnetv2' or args.network.lower() == 'wavenetx' or args.network.lower() == 'wavenetx2':
                     loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
                     loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
                     loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
