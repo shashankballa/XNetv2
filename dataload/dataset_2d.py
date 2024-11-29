@@ -103,7 +103,7 @@ class dataset_XNetv2(Dataset):
             bin_mask = torch.zeros_like(mask_1, dtype=torch.bool)
             bin_mask[mask_1 > 0] = True
 
-            sampel = {
+            sample = {
                 'image': img_1, 'mask': mask_1, 'L': L, 'H': H, 'ID': os.path.split(mask_path)[1]
                 , 'bin_mask': bin_mask
                 }
@@ -119,9 +119,9 @@ class dataset_XNetv2(Dataset):
             L = normalize_1['L']
             H = normalize_1['H']
 
-            sampel = {'image': img_1, 'L': L, 'H': H, 'ID': os.path.split(img_path_1)[1]}
+            sample = {'image': img_1, 'L': L, 'H': H, 'ID': os.path.split(img_path_1)[1]}
 
-        return sampel
+        return sample
 
     def __len__(self):
         return len(self.img_paths_1)
@@ -139,9 +139,8 @@ def imagefolder_XNetv2(data_dir, data_transform_1, data_normalize_1, wavelet_typ
                            **kwargs)
     return dataset
 
-
 class dataset_WaveNetX(Dataset):
-    def __init__(self, data_dir, augmentation_1, normalize_1, wavelet_type, alpha, beta, sup=True, num_images=None, **kwargs):
+    def __init__(self, data_dir, augmentation_1, normalize_1, sup=True, num_images=None, **kwargs):
         super(dataset_WaveNetX, self).__init__()
 
         img_paths_1 = []
@@ -193,13 +192,23 @@ class dataset_WaveNetX(Dataset):
         img_path_1 = self.img_paths_1[index]
         img_1 = Image.open(img_path_1)
         img_1 = np.array(img_1)
+        h_img, w_img = img_1.shape[:2]
+        crop_size = min(min(h_img, w_img), 512)
+        h_start = random.randint(0, h_img - crop_size)
+        w_start = random.randint(0, w_img - crop_size)
+
+        img_1 = img_1[h_start:h_start + crop_size, w_start:w_start + crop_size]
 
         if self.sup:
             mask_path = self.mask_paths[index]
             mask = Image.open(mask_path)
             mask = np.array(mask)
+            h_mask, w_mask = mask.shape[:2]
+            if h_img != h_mask or w_img != w_mask:
+                raise ValueError(f"Image and mask should have the same dimensions")
             
-
+            mask = mask[h_start:h_start + crop_size, w_start:w_start + crop_size]
+            
             augment_1 = self.augmentation_1(image=img_1, mask=mask)
             img_1 = augment_1['image']
             mask_1 = augment_1['mask']
@@ -211,7 +220,7 @@ class dataset_WaveNetX(Dataset):
             bin_mask = torch.zeros_like(mask_1, dtype=torch.bool)
             bin_mask[mask_1 > 0] = True
 
-            sampel = {
+            sample = {
                 'image': img_1, 'mask': mask_1, 'ID': os.path.split(mask_path)[1]
                 , 'bin_mask': bin_mask
                 }
@@ -223,9 +232,18 @@ class dataset_WaveNetX(Dataset):
             normalize_1 = self.normalize_1(image=img_1)
             img_1 = normalize_1['image']
 
-            sampel = {'image': img_1, 'ID': os.path.split(img_path_1)[1]}
+            sample = {'image': img_1, 'ID': os.path.split(img_path_1)[1]}
 
-        return sampel
+        return sample
 
     def __len__(self):
         return len(self.img_paths_1)
+    
+def imagefolder_WaveNetX(data_dir, data_transform_1, data_normalize_1, sup=True, num_images=None, **kwargs):
+    dataset = dataset_WaveNetX(data_dir=data_dir,
+                          augmentation_1=data_transform_1,
+                          normalize_1=data_normalize_1,
+                          sup=sup,
+                          num_images=num_images,
+                           **kwargs)
+    return dataset
