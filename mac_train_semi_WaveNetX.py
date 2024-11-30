@@ -109,6 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--flen', default=8, type=int, help='filter length in the DWT layer')
     parser.add_argument('-l1', '--lambda1', default=0, type=float)
     parser.add_argument('-l2', '--lambda2', default=0, type=float)
+    parser.add_argument('--seed', default=42, type=int)
     args = parser.parse_args()
 
     if args.show_args:
@@ -128,7 +129,7 @@ if __name__ == '__main__':
     device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     print(f"Using device: {device}")
 
-    init_seeds(42)
+    init_seeds(args.seed)
 
     dataset_name = args.dataset_name
     cfg = dataset_cfg(dataset_name)
@@ -195,7 +196,7 @@ if __name__ == '__main__':
         num_images=num_images_unsup,
         rand_crop=False,
     )
-    
+
     dataset_val = imagefolder_WaveNetX(
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
