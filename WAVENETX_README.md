@@ -9,14 +9,12 @@ python mac_test.py -p "dataset_tiff/GLAS/GLAS/XNetv2-l=0.5-e=200-s=50-g=0.5-b=16
 ```
 Testing WaveNetX Model* (To be Updated from Shashank)
 ```
-python mac_test.py -p "dataset_tiff/GLAS/GLAS/WaveNetX-l=0.5-e=200-s=50-g=0.5-b=16-uw=0.5-w=20-20-80/best_WaveNetX_Jc_0.6898.pth" -n 
+python mac_test.py -p "dataset_tiff/GLAS/GLAS/WaveNetX-l=0.5-e=200-s=50-g=0.5-b=16-uw=0.5-w=20-20-80/best_WaveNetX_Jc_0.6898.pth" -n WaveNetX
 ```
-WaveNetX
 Testing WaveNetX2 Model
 ```
-python mac_test.py -p "dataset_tiff/GLAS/GLAS/WaveNetX2-l=0.5-e=200-s=50-g=0.5-b=16-uw=0.5-w=20-20-80/best_wavenetx2_Jc_0.6215.pth" -n 
+python mac_test.py -p "dataset_tiff/GLAS/GLAS/WaveNetX2-l=0.5-e=200-s=50-g=0.5-b=16-uw=0.5-w=20-20-80/best_wavenetx2_Jc_0.6215.pth" -n WaveNetX2 
 ```
-WaveNetX2
 Required Arguments
 ```
 -p: Path to the trained model .pth file.
