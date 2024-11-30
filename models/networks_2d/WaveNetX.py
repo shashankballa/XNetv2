@@ -188,7 +188,7 @@ class WaveNetX(nn.Module):
 
         # H network
         self.H_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.H_Conv1 = conv_block(ch_in=nfil*in_channels, ch_out=64)
+        self.H_Conv1 = conv_block(ch_in=nfil*3*in_channels, ch_out=64)
         self.H_Conv2 = conv_block(ch_in=64, ch_out=128)
         self.H_Conv3 = conv_block(ch_in=128, ch_out=256)
         self.H_Conv4 = conv_block(ch_in=256, ch_out=512)
@@ -214,7 +214,9 @@ class WaveNetX(nn.Module):
         # main encoder
 
         x_L, (x_LH, x_HL, x_HH) = self.dwt(x_main)
-        x_H = x_HL + x_LH + x_HH
+        # x_H = x_HL + x_LH + x_HH
+
+        x_H = torch.cat((x_LH, x_HL, x_HH), dim=1)
 
         # Resize x_L and x_H to match the spatial dimensions of x_main
         x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
@@ -321,17 +323,51 @@ class WaveNetX(nn.Module):
         H_d1 = self.H_Conv_1x1(H_d2)
 
         return M_d1, L_d1, H_d1
+    
+    def get_M_net_params(self):
+        return list(self.M_Conv1.parameters()) + list(self.M_Conv2.parameters()) + list(self.M_Conv3.parameters()) + list(self.M_Conv4.parameters()) + list(self.M_Conv5.parameters()) + \
+               list(self.M_Up_conv5.parameters()) + list(self.M_Up_conv4.parameters()) + list(self.M_Up_conv3.parameters()) + list(self.M_Up_conv2.parameters()) + list(self.M_Conv_1x1.parameters())
+    
+    def get_L_net_params(self):
+        return list(self.L_Conv1.parameters()) + list(self.L_Conv2.parameters()) + list(self.L_Conv3.parameters()) + list(self.L_Conv4.parameters()) + list(self.L_Conv5.parameters()) + \
+               list(self.L_Up_conv5.parameters()) + list(self.L_Up_conv4.parameters()) + list(self.L_Up_conv3.parameters()) + list(self.L_Up_conv2.parameters()) + list(self.L_Conv_1x1.parameters())
+    
+    def get_H_net_params(self):
+        return list(self.H_Conv1.parameters()) + list(self.H_Conv2.parameters()) + list(self.H_Conv3.parameters()) + list(self.H_Conv4.parameters()) + list(self.H_Conv5.parameters()) + \
+               list(self.H_Up_conv5.parameters()) + list(self.H_Up_conv4.parameters()) + list(self.H_Up_conv3.parameters()) + list(self.H_Up_conv2.parameters()) + list(self.H_Conv_1x1.parameters())
+    
+    def get_fusion_params(self):
+        return list(self.M_H_Conv1.parameters()) + list(self.M_H_Conv2.parameters()) + list(self.M_L_Conv3.parameters()) + list(self.M_L_Conv4.parameters())
 
-def wavenetx(in_channels, num_classes, flen=8, nfil=32):
+def wavenetx(in_channels, num_classes, flen=8, nfil=16, **kwargs):
+    print('Building WaveNetX model with %d %d-tap filters' % (nfil, flen))
     model = WaveNetX(in_channels, num_classes, flen=flen, nfil=nfil)
     init_weights(model, 'kaiming')
     return model
 
 def plot_dwt(x_dwt, idx=0):
-    _LL = torch.tensor(x_dwt[0])
-    _LH = torch.tensor(x_dwt[1][0])
-    _HL = torch.tensor(x_dwt[1][1])
-    _HH = torch.tensor(x_dwt[1][2])
+    if isinstance(x_dwt[0], torch.Tensor):
+        _LL = x_dwt[0].detach().cpu()
+        _LH = x_dwt[1][0].detach().cpu()
+        _HL = x_dwt[1][1].detach().cpu()
+        _HH = x_dwt[1][2].detach().cpu()
+    elif isinstance(x_dwt[0], np.ndarray):
+        _LL = torch.tensor(x_dwt[0])
+        _LH = torch.tensor(x_dwt[1][0])
+        _HL = torch.tensor(x_dwt[1][1])
+        _HH = torch.tensor(x_dwt[1][2])
+        if len(_LL.shape) == 3:
+            _LL = _LL.unsqueeze(0)
+            _LH = _LH.unsqueeze(0)
+            _HL = _HL.unsqueeze(0)
+            _HH = _HH.unsqueeze(0)
+    else:
+        raise ValueError('x_dwt should be a list of tensors or numpy arrays')
+    # normalize to [0, 1]
+    _LL = (_LL - _LL.min()) / (_LL.max() - _LL.min())
+    _LH = (_LH - _LH.min()) / (_LH.max() - _LH.min())
+    _HL = (_HL - _HL.min()) / (_HL.max() - _HL.min())
+    _HH = (_HH - _HH.min()) / (_HH.max() - _HH.min())
     plt.figure()
     plt.subplot(2, 2, 1)
     plt.imshow(_LL[idx].permute(1, 2, 0).numpy(), cmap='gray')
@@ -349,12 +385,157 @@ def plot_dwt(x_dwt, idx=0):
     plt.imshow(_HH[idx].permute(1, 2, 0).numpy(), cmap='gray')
     plt.title('HH')
     plt.axis('off')
+    return
+
+def plot_idwt(x_idwt, x_orig=None):
+    if isinstance(x_idwt, torch.Tensor):
+        x_idwt = x_idwt.detach().cpu()
+    elif isinstance(x_idwt, np.ndarray):
+        x_idwt = torch.tensor(x_idwt)
+        if len(x_idwt.shape) == 3:
+            x_idwt = x_idwt.unsqueeze(0)
+    else:
+        raise ValueError('x_idwt should be a tensor or numpy array')
+    # normalize to [0, 1]
+    x_idwt = (x_idwt - x_idwt.min()) / (x_idwt.max() - x_idwt.min())
+    if x_orig is None:
+        plt.figure()
+        plt.imshow(x_idwt[0].permute(1, 2, 0).numpy(), cmap='gray')
+        plt.axis('off')
+    else:
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(x_idwt[0].permute(1, 2, 0).numpy(), cmap='gray')
+        plt.title('IDWT')
+        plt.axis('off')
+        plt.subplot(1, 2, 2)
+        plt.imshow(x_orig[0].permute(1, 2, 0).numpy(), cmap='gray')
+        plt.title('Original')
+        plt.axis('off')
+    return
+
+def plot_fil(fil, fil_hi=None):
+    if isinstance(fil, torch.Tensor):
+        fil = fil.detach().cpu()
+    elif isinstance(fil, np.ndarray) or isinstance(fil, list):
+        fil = torch.tensor(fil)
+    else:
+        raise ValueError('fil should be a tensor, numpy array or list')
+    fil = fil.squeeze()
+
+    if len(fil.shape) != 1:
+        raise ValueError('fil should be a 1D tensor')
+
+    if fil_hi is None:
+        plt.figure()
+        plt.bar(range(fil.shape[0]), fil.numpy())
+        plt.title('Filter Bank')
+        plt.xlabel('Index')
+    else:
+        if isinstance(fil_hi, torch.Tensor):
+            fil_hi = fil_hi.detach().cpu()
+        elif isinstance(fil_hi, np.ndarray) or isinstance(fil_hi, list):
+            fil_hi = torch.tensor(fil_hi)
+        else:
+            raise ValueError('fil_hi should be a tensor, numpy array or list')
+        fil_hi = fil_hi.squeeze()
+
+        if len(fil_hi.shape) != 1:
+            raise ValueError('fb_hi should be a 1D tensor')
+        plt.figure()
+        plt.bar(range(fil.shape[0]), fil.numpy(), label='Low-pass FB')
+        plt.bar(range(fil_hi.shape[0]), fil_hi.numpy(), label='High-pass FB', alpha=0.7)
+        plt.title('Low-pass and High-pass FB')
+        plt.xlabel('Index')
+        plt.legend()
+    return
+
+def plot_fil_2d(fil_lo = None, fil_hi = None, fil_2d = None, figure_name='Filter Bank 2D'):
+    fil_ll, fil_lh, fil_hl, fil_hh = None, None, None, None
+    if fil_lo is None and fil_hi is None and fil_2d is None:
+        raise ValueError('At least one of fil_lo, fil_hi or fil_conv should be provided')
+
+    if fil_2d is not None:
+        if isinstance(fil_2d[0], torch.Tensor):
+            fil_ll = fil_2d[0].detach().cpu()
+            fil_lh = fil_2d[1].detach().cpu()
+            fil_hl = fil_2d[2].detach().cpu()
+            fil_hh = fil_2d[3].detach().cpu()
+        elif isinstance(fil_2d[0], np.ndarray or isinstance(fil_2d[0], list)):
+            fil_ll = torch.tensor(fil_2d[0])
+            fil_lh = torch.tensor(fil_2d[1])
+            fil_hl = torch.tensor(fil_2d[2])
+            fil_hh = torch.tensor(fil_2d[3])
+        else:
+            raise ValueError('fil_2d should be a list of tensors or numpy arrays')
+    elif fil_lo is not None:
+        if isinstance(fil_lo, torch.Tensor):
+            fil_lo = fil_lo.detach().cpu()
+        elif isinstance(fil_lo, np.ndarray) or isinstance(fil_lo, list):
+            fil_lo = torch.tensor(fil_lo)
+        else:
+            raise ValueError('fil_lo should be a tensor, numpy array or list')
+        
+        fil_lo = fil_lo.squeeze()
+        if len(fil_lo.shape) != 1:
+            raise ValueError('fil_lo should be a 1D tensor')
+        
+        fil_lo = F.normalize(fil_lo, p=2, dim=-1)
+
+        if fil_hi is None:
+            fil_hi = fil_lo.flip(-1)
+            fil_hi[:, ::2] *= -1
+            fil_hi -= fil_hi.mean(dim=-1, keepdim=True)
+        else:
+            if isinstance(fil_hi, torch.Tensor):
+                fil_hi = fil_hi.detach().cpu()
+            elif isinstance(fil_hi, np.ndarray) or isinstance(fil_hi, list):
+                fil_hi = torch.tensor(fil_hi)
+            else:
+                raise ValueError('fil_hi should be a tensor, numpy array or list')
+            fil_hi = fil_hi.squeeze()
+            if len(fil_hi.shape) != 1:
+                raise ValueError('fil_hi should be a 1D tensor')
+            fil_hi = F.normalize(fil_hi, p=2, dim=-1)
+        
+        fil_ll = torch.einsum('n,m->nm', fil_lo, fil_lo)
+        fil_lh = torch.einsum('n,m->nm', fil_hi, fil_lo)
+        fil_hl = torch.einsum('n,m->nm', fil_lo, fil_hi)
+        fil_hh = torch.einsum('n,m->nm', fil_hi, fil_hi)
+    
+    plt.figure()
+    plt.suptitle(figure_name)
+    plt.subplot(2, 2, 1)
+    plt.imshow(fil_ll.numpy(), cmap='gray')
+    plt.title('LL')
+    plt.axis('off')
+    plt.subplot(2, 2, 2)
+    plt.imshow(fil_lh.numpy(), cmap='gray')
+    plt.title('LH')
+    plt.axis('off')
+    plt.subplot(2, 2, 3)
+    plt.imshow(fil_hl.numpy(), cmap='gray')
+    plt.title('HL')
+    plt.axis('off')
+    plt.subplot(2, 2, 4)
+    plt.imshow(fil_hh.numpy(), cmap='gray')
+    plt.title('HH')
+    plt.axis('off')
+    return
 
 if __name__ == '__main__':
 
     from PIL import Image
     import torchvision.transforms as transforms
     import os
+    import sys
+    
+    # if -v is passed as argument, then plot the DWT and IDWT images
+    plot_img = False
+    if '-v' in sys.argv:
+        plot_img = True
+
+
     _current_dir = os.path.dirname(os.path.abspath(__file__))
     image_path = _current_dir+'/../../dataset/GLAS/Test Folder/img/0001.png'
     img = Image.open(image_path)
@@ -366,24 +547,54 @@ if __name__ == '__main__':
     rnd_h_off = torch.randint(0, h_img - crop_size + 1, (1,)).item()
     rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
     img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
-    # img_gray = img_crop.mean(dim=1, keepdim=True)
-
-    flen = 8
-    rand_lo = torch.rand(flen) - 0.5
-    unit_lo = rand_lo / rand_lo.norm()
-    print('unit_lo: ', unit_lo)
-    print('L2 norm: ', unit_lo.norm().item())  # Should be 1
-    print('Sum: ', unit_lo.sum().item())  # Should be 1
-    # unit_lo = torch.tensor(pywt.Wavelet('haar').dwt_lo)
 
     nfil = 16
     rand_dwt_layer = DWT_1lvl(nfil=nfil)
     img_rand_dwt = rand_dwt_layer(img_crop)
 
-    for idx in range(nfil):
-        img_idx_dwt = get_img_dwt(img_rand_dwt, idx=idx, nfil=nfil)
-        plot_dwt(img_idx_dwt)
+    # if plot_img:
+    #     for idx in range(nfil):
+    #         img_idx_dwt = get_img_dwt(img_rand_dwt, idx=idx, nfil=nfil)
+    #         plot_dwt(img_idx_dwt)
 
-    plt.show()
+    # test with dwt2 from pywt with db4
+    wletstr = 'db4'
+    wavelet = pywt.Wavelet(wletstr)
+    img_dwt = pywt.dwt2(img_crop.squeeze().numpy(), wavelet)
+
+    print('LL '+wletstr+':', img_dwt[0].shape)
+    print('LH '+wletstr+':', img_dwt[1][0].shape)
+    print('HL '+wletstr+':', img_dwt[1][1].shape)
+    print('HH '+wletstr+':', img_dwt[1][2].shape)
+
+    # plot the DWT filter from wavelet
+    dec_lo = wavelet.dec_lo
+    dec_hi = wavelet.dec_hi
+    print(' DWT LP '+wletstr+': ', dec_lo)
+    print(' DWT HP '+wletstr+': ', dec_hi)
+    if plot_img:
+        plot_fil(dec_lo, dec_hi)
+        plot_fil_2d(fil_lo=dec_lo, fil_hi=dec_hi)
+
+    rec_lo = wavelet.rec_lo
+    rec_hi = wavelet.rec_hi
+    print('IDWT LP '+wletstr+': ', rec_lo)
+    print('IDWT HP '+wletstr+': ', rec_hi)
+    if plot_img:
+        plot_fil(rec_lo, rec_hi)
+        plot_fil_2d(fil_lo=rec_lo, fil_hi=rec_hi)
+    
+
+    if plot_img:
+        plot_dwt(img_dwt)
+
+    # test idwt2 from pywt
+    img_idwt = pywt.idwt2(img_dwt, wavelet)
+
+    if plot_img:
+        plot_idwt(img_idwt, img_crop)
+
+    if plot_img:
+        plt.show()
 
     exit(-1)

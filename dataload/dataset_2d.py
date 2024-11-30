@@ -140,7 +140,7 @@ def imagefolder_XNetv2(data_dir, data_transform_1, data_normalize_1, wavelet_typ
     return dataset
 
 class dataset_WaveNetX(Dataset):
-    def __init__(self, data_dir, augmentation_1, normalize_1, sup=True, num_images=None, **kwargs):
+    def __init__(self, data_dir, augmentation_1, normalize_1, sup=True, num_images=None, rand_crop=False, **kwargs):
         super(dataset_WaveNetX, self).__init__()
 
         img_paths_1 = []
@@ -186,6 +186,7 @@ class dataset_WaveNetX(Dataset):
         self.normalize_1 = normalize_1
         self.sup = sup
         self.kwargs = kwargs
+        self.rand_crop = rand_crop
 
     def __getitem__(self, index):
 
@@ -194,8 +195,12 @@ class dataset_WaveNetX(Dataset):
         img_1 = np.array(img_1)
         h_img, w_img = img_1.shape[:2]
         crop_size = min(min(h_img, w_img), 512)
-        h_start = random.randint(0, h_img - crop_size)
-        w_start = random.randint(0, w_img - crop_size)
+        if self.rand_crop:
+            h_start = (h_img - crop_size) // 2
+            w_start = (w_img - crop_size) // 2
+        else:
+            h_start = random.randint(0, h_img - crop_size)
+            w_start = random.randint(0, w_img - crop_size)
 
         img_1 = img_1[h_start:h_start + crop_size, w_start:w_start + crop_size]
 
@@ -239,11 +244,13 @@ class dataset_WaveNetX(Dataset):
     def __len__(self):
         return len(self.img_paths_1)
     
-def imagefolder_WaveNetX(data_dir, data_transform_1, data_normalize_1, sup=True, num_images=None, **kwargs):
+def imagefolder_WaveNetX(data_dir, data_transform_1, data_normalize_1, sup=True, num_images=None, rand_crop=False,
+                         **kwargs):
     dataset = dataset_WaveNetX(data_dir=data_dir,
                           augmentation_1=data_transform_1,
                           normalize_1=data_normalize_1,
                           sup=sup,
                           num_images=num_images,
+                          rand_crop=rand_crop,
                            **kwargs)
     return dataset

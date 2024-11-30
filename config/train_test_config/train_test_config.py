@@ -6,12 +6,14 @@ from PIL import Image
 import torchio as tio
 
 
-def print_train_loss_XNetv2(train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss_unsup, train_loss, num_batches, print_num, print_num_minus):
-    train_epoch_loss_sup1 = train_loss_sup_1 / num_batches['train_sup']
-    train_epoch_loss_sup2 = train_loss_sup_2 / num_batches['train_sup']
-    train_epoch_loss_sup3 = train_loss_sup_3 / num_batches['train_sup']
-    train_epoch_loss_unsup = train_loss_unsup / num_batches['train_sup']
-    train_epoch_loss = train_loss / num_batches['train_sup']
+def print_train_loss_XNetv2(train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss_unsup, train_loss, num_batches, print_num, print_num_minus, batch_size = None):
+    if batch_size is None:
+        batch_size = num_batches['train_sup']
+    train_epoch_loss_sup1 = train_loss_sup_1 / batch_size
+    train_epoch_loss_sup2 = train_loss_sup_2 / batch_size
+    train_epoch_loss_sup3 = train_loss_sup_3 / batch_size
+    train_epoch_loss_unsup = train_loss_unsup / batch_size
+    train_epoch_loss = train_loss / batch_size
     print('-' * print_num)
     print('| Train Sup Loss 1: {:.4f}'.format(train_epoch_loss_sup1).ljust(print_num_minus, ' '), '|')
     print('| Train Sup Loss 2: {:.4f}'.format(train_epoch_loss_sup2).ljust(print_num_minus, ' '), '|')
