@@ -109,6 +109,7 @@ if __name__ == '__main__':
     parser.add_argument('--flen', default=8, type=int, help='filter length in the DWT layer')
     parser.add_argument('-l1', '--lambda1', default=0, type=float)
     parser.add_argument('-l2', '--lambda2', default=0, type=float)
+    parser.add_argument('-fbl', '--fb_loss_wt', default=1, type=float, help='fb hi loss weight')
     parser.add_argument('--seed', default=42, type=int)
     args = parser.parse_args()
 
@@ -124,6 +125,7 @@ if __name__ == '__main__':
 
     l1_lambda = args.lambda1 * 1e-10
     l2_lambda = args.lambda2 * 1e-10
+    fb_lambda = args.fb_loss_wt * 1e-1
 
     # Set device to MPS or CPU
     device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
@@ -145,7 +147,8 @@ if __name__ == '__main__':
         '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
             '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
                 '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step)
+                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                            '-fbl=' + str(args.fb_loss_wt)
     os.makedirs(path_trained_models, exist_ok=True)
 
     # Segmentation results save
@@ -155,7 +158,8 @@ if __name__ == '__main__':
         '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
             '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
                 '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step)
+                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                            '-fbl=' + str(args.fb_loss_wt)
     os.makedirs(path_seg_results, exist_ok=True)
 
     # Visualization initialization
@@ -164,7 +168,8 @@ if __name__ == '__main__':
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
                     '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark)) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                        '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step)
+                        '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                            '-fbl=' + str(args.fb_loss_wt)
         visdom = visdom_initialization_XNetv2(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
@@ -290,18 +295,21 @@ if __name__ == '__main__':
                 loss_train_unsup = loss_train_unsup * unsup_weight
 
                 # L2 regularization for M, L, and Fusion network parameters
-                if l2_lambda > 0:
-                    M_params = model1.get_M_net_params()
-                    L_params = model1.get_L_net_params()
-                    Fusion_params = model1.get_fusion_params()
-                    l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
-                    loss_train_unsup += l2_lambda * l2_loss
+                # if l2_lambda > 0:
+                #     M_params = model1.get_M_net_params()
+                #     L_params = model1.get_L_net_params()
+                #     Fusion_params = model1.get_fusion_params()
+                #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
+                #     loss_train_unsup += l2_lambda * l2_loss
 
-                # L1 regularization for H network parameters
-                if l1_lambda > 0:
-                    H_params = model1.get_H_net_params()
-                    l1_loss = get_parms_lp_norm(H_params, 1)
-                    loss_train_unsup += l1_lambda * l1_loss
+                # # L1 regularization for H network parameters
+                # if l1_lambda > 0:
+                #     H_params = model1.get_H_net_params()
+                #     l1_loss = get_parms_lp_norm(H_params, 1)
+                #     loss_train_unsup += l1_lambda * l1_loss
+
+                fb_hi_loss_unsup = model1.dwt.get_fb_hi_loss()
+                loss_train_unsup += fb_hi_loss_unsup * fb_lambda
 
                 loss_train_unsup.backward(retain_graph=True)
                 loss_train += loss_train_unsup
@@ -323,25 +331,32 @@ if __name__ == '__main__':
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
 
             loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup) + criterion(pred_train_sup2, bin_mask_train_sup) + criterion(pred_train_sup3, bin_mask_train_sup)
+            train_loss_sup_1 += loss_train_sup1.item()
+
             loss_train_sup = loss_train_sup1
 
             loss_train_sup2 = 0
-            if l2_lambda > 0:
-                M_params = model1.get_M_net_params()
-                L_params = model1.get_L_net_params()
-                Fusion_params = model1.get_fusion_params()
-                l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
-                loss_train_sup2 = l2_lambda * l2_loss
-                loss_train_sup += loss_train_sup2
-                train_loss_sup_2 += loss_train_sup2.item()
+            fb_hi_loss_sup = model1.dwt.get_fb_hi_loss()
+            loss_train_sup2 = fb_hi_loss_sup * fb_lambda
+            train_loss_sup_2 += loss_train_sup2.item()
+            # if l2_lambda > 0:
+            #     M_params = model1.get_M_net_params()
+            #     L_params = model1.get_L_net_params()
+            #     Fusion_params = model1.get_fusion_params()
+            #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
+            #     loss_train_sup2 = l2_lambda * l2_loss
+            #     loss_train_sup += loss_train_sup2
+            #     train_loss_sup_2 += loss_train_sup2.item()
 
             loss_train_sup3 = 0
-            if l1_lambda > 0:
-                H_params = model1.get_H_net_params()
-                l1_loss = get_parms_lp_norm(H_params, 1)
-                loss_train_sup3 += l1_lambda * l1_loss
-                loss_train_sup += loss_train_sup3
-                train_loss_sup_3 += loss_train_sup3.item()
+            # if l1_lambda > 0:
+            #     H_params = model1.get_H_net_params()
+            #     l1_loss = get_parms_lp_norm(H_params, 1)
+            #     loss_train_sup3 += l1_lambda * l1_loss
+            #     loss_train_sup += loss_train_sup3
+            #     train_loss_sup_3 += loss_train_sup3.item()
+
+            loss_train_sup += loss_train_sup2
 
             loss_train_sup.backward()
 

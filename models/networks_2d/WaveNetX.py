@@ -8,6 +8,137 @@ import matplotlib.pyplot as plt
 from einops import rearrange
 from torch.nn import init
 
+class DWT_1lvl(nn.Module):
+
+    def __init__(self, fb_lo = None, flen = 8, nfil = 1,
+                 pad_mode="replicate"):
+        '''
+        DWT_1lvl: 1-level multi-filter DWT using 2D convolution
+        Args:
+            fb_lo: low-pass filter bank
+            flen: filter length
+            nfil: number of filters
+        '''
+
+        super(DWT_1lvl, self).__init__()
+
+        self.fb_lo = nn.Parameter(self.get_fb_lo(fb_lo, flen, nfil))
+        self.nfil = self.fb_lo.shape[0]
+        self.flen = self.fb_lo.shape[1]
+        self.pad_mode = pad_mode
+
+    def get_fb_lo(self, fb_lo = None, flen = 8, nfil = 1):
+        if fb_lo is None:
+            fb_lo = torch.rand((nfil, flen)) # - 0.5 # zero-mean not needed
+        else:
+            if not isinstance(fb_lo, torch.Tensor):
+                if isinstance(fb_lo, np.ndarray) or isinstance(fb_lo, list):
+                    fb_lo = torch.tensor(fb_lo)
+                else:
+                    raise ValueError('fb_lo should be a tensor or numpy array')
+            if fb_lo.dim() > 2:
+                raise ValueError('fb_lo should be a 1D or 2D tensor')
+            if fb_lo.dim() == 1:
+                fb_lo = fb_lo.unsqueeze(0)
+        return fb_lo
+    
+    def get_pads(self, x_shape):
+        padb = (2 * self.flen - 3) // 2
+        padt = (2 * self.flen - 3) // 2
+        if x_shape[2] % 2 != 0:
+            padb += 1
+        padr = (2 * self.flen - 3) // 2
+        padl = (2 * self.flen - 3) // 2
+        if x_shape[3] % 2 != 0:
+            padl += 1
+        return [padl, padr, padt, padb]
+    
+    def get_fb_conv_list(self, inp_channels):
+        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
+        fb_hi = fb_lo.flip(-1)
+        fb_hi[:, ::2] *= -1
+        # fb_hi -= fb_hi.mean(dim=-1, keepdim=True)
+        fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
+        fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
+        fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
+        fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+        # Prepare the 2D filter banks for conv2d
+        fb_ll = fb_ll.view(fb_ll.shape[0], 1, fb_ll.shape[1], fb_ll.shape[2]).repeat(inp_channels, 1, 1, 1)
+        fb_lh = fb_lh.view(fb_lh.shape[0], 1, fb_lh.shape[1], fb_lh.shape[2]).repeat(inp_channels, 1, 1, 1)
+        fb_hl = fb_hl.view(fb_hl.shape[0], 1, fb_hl.shape[1], fb_hl.shape[2]).repeat(inp_channels, 1, 1, 1)
+        fb_hh = fb_hh.view(fb_hh.shape[0], 1, fb_hh.shape[1], fb_hh.shape[2]).repeat(inp_channels, 1, 1, 1)
+        return fb_ll, fb_lh, fb_hl, fb_hh
+    
+    def get_fb_hi_loss(self):
+        # Ensure that fb_hi is zero-mean
+        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
+        fb_hi = fb_lo.flip(-1)
+        fb_hi[:, ::2] *= -1
+        return fb_hi.sum(dim=-1).abs().sum()
+
+    def forward(self, x):
+        x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
+        fb_ll, fb_lh, fb_hl, fb_hh = self.get_fb_conv_list(x.shape[1])
+        x_ll = F.conv2d(x_pad, fb_ll.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_lh = F.conv2d(x_pad, fb_lh.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_hl = F.conv2d(x_pad, fb_hl.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_hh = F.conv2d(x_pad, fb_hh.to(x_pad.device), stride=2, groups=x.shape[1])
+        return x_ll, (x_lh, x_hl, x_hh)
+
+class IDWT_1lvl(nn.Module):
+    def __init__(self):
+        super(IDWT_1lvl, self).__init__()
+    
+    def get_fb_conv_list(self, dwt_fb_lo, out_channels):
+        fb_lo = F.normalize(dwt_fb_lo, p=2, dim=-1)
+        # Generate high-pass filters by flipping and changing signs
+        fb_hi = fb_lo.flip(-1)
+        fb_hi[:, ::2] *= -1
+        fb_lo = fb_lo.flip(-1) # flip the Synthesis filters
+        fb_hi = fb_hi.flip(-1)
+        flip_dims = (-1, -2)
+        fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo).flip(dims=flip_dims)
+        fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo).flip(dims=flip_dims)
+        fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi).flip(dims=flip_dims)
+        fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi).flip(dims=flip_dims)
+        # Prepare the 2D filter banks for conv2d
+        fb_ll = fb_ll.view(fb_ll.shape[0], 1, fb_ll.shape[1], fb_ll.shape[2]).repeat(out_channels, 1, 1, 1)
+        fb_lh = fb_lh.view(fb_lh.shape[0], 1, fb_lh.shape[1], fb_lh.shape[2]).repeat(out_channels, 1, 1, 1)
+        fb_hl = fb_hl.view(fb_hl.shape[0], 1, fb_hl.shape[1], fb_hl.shape[2]).repeat(out_channels, 1, 1, 1)
+        fb_hh = fb_hh.view(fb_hh.shape[0], 1, fb_hh.shape[1], fb_hh.shape[2]).repeat(out_channels, 1, 1, 1)
+        return [fb_ll, fb_lh, fb_hl, fb_hh]
+    
+    def get_pads(self, flen):
+        padl = (2 * flen - 3) // 2
+        padr = (2 * flen - 3) // 2
+        padt = (2 * flen - 3) // 2
+        padb = (2 * flen - 3) // 2
+        return padl, padr, padt, padb
+    
+    def safe_unpad(self, x, flen):
+        padl, padr, padt, padb = self.get_pads(flen)
+        if padt > 0:
+            x = x[..., padt:, :]
+        if padb > 0:
+            x = x[..., :-padb, :]
+        if padl > 0:
+            x = x[..., padl:]
+        if padr > 0:
+            x = x[..., :-padr]
+        return x
+    
+    def forward(self, x: Tuple, dwt_fb_lo: torch.Tensor, out_channels: int) -> torch.Tensor:
+        fb = self.get_fb_conv_list(dwt_fb_lo, out_channels)
+        x_idwt = F.conv_transpose2d(x[0], fb[0].to(x[0].device), stride=2, groups=out_channels) + \
+                    F.conv_transpose2d(x[1][0], fb[1].to(x[1][0].device), stride=2, groups=out_channels) + \
+                    F.conv_transpose2d(x[1][1], fb[2].to(x[1][1].device), stride=2, groups=out_channels) + \
+                    F.conv_transpose2d(x[1][2], fb[3].to(x[1][2].device), stride=2, groups=out_channels)
+        
+        x_idwt = self.safe_unpad(x_idwt, dwt_fb_lo.shape[1])
+
+        return x_idwt
+
+
 def init_weights(net, init_type='normal', gain=0.02):
     def init_func(m):
         classname = m.__class__.__name__
@@ -60,87 +191,6 @@ class up_conv(nn.Module):
     def forward(self, x):
         x = self.up(x)
         return x
-
-class DWT_1lvl(nn.Module):
-
-    def __init__(self, fb_lo = None, flen = 8, nfil = 1,
-                 pad_mode="replicate"):
-        '''
-        DWT_1lvl: 1-level multi-filter DWT using 2D convolution
-        Args:
-            fb_lo: low-pass filter bank
-            flen: filter length
-            nfil: number of filters
-        '''
-
-        super(DWT_1lvl, self).__init__()
-
-        self.fb_lo = nn.Parameter(self.get_fb_lo(fb_lo, flen, nfil))
-        self.nfil = self.fb_lo.shape[0]
-        self.flen = self.fb_lo.shape[1]
-        self.pad_mode = pad_mode
-
-    def get_fb_lo(self, fb_lo = None, flen = 8, nfil = 1):
-        if fb_lo is None:
-            fb_lo = torch.rand((nfil, flen)) - 0.5
-        else:
-            if not isinstance(fb_lo, torch.Tensor):
-                if isinstance(fb_lo, np.ndarray):
-                    fb_lo = torch.tensor(fb_lo)
-                else:
-                    raise ValueError('fb_lo should be a tensor or numpy array')
-            if fb_lo.dim() > 2:
-                raise ValueError('fb_lo should be a 1D or 2D tensor')
-            if fb_lo.dim() == 1:
-                fb_lo = fb_lo.unsqueeze(0)
-        return fb_lo
-    
-    def get_fb_conv(self, img_channels):
-        # Normalize the low-pass filters to have unit norm
-        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
-        # Generate high-pass filters by flipping and changing signs
-        fb_hi = fb_lo.flip(-1)
-        fb_hi[:, ::2] *= -1
-        fb_hi -= fb_hi.mean(dim=-1, keepdim=True)
-        # Create 2D filter banks using outer products
-        fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
-        fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
-        fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
-        fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
-        # Prepare the 2D filter banks for conv2d
-        fb_conv = torch.stack([fb_ll, fb_lh, fb_hl, fb_hh], 1)
-        fb_conv = fb_conv.view(-1, fb_conv.shape[-2], fb_conv.shape[-1])
-        fb_conv = fb_conv.repeat(img_channels, 1, 1)
-        fb_conv = fb_conv.unsqueeze(dim=1)
-        return fb_conv
-
-    def forward(self, x):
-
-        b, c, h, w = x.shape
-
-        padb = (2 * self.flen - 3) // 2
-        padt = (2 * self.flen - 3) // 2
-        if h % 2 != 0:
-            padb += 1
-        padr = (2 * self.flen - 3) // 2
-        padl = (2 * self.flen - 3) // 2
-        if w % 2 != 0:
-            padl += 1
-
-        x_pad = F.pad(x, [padl, padr, padt, padb], mode=self.pad_mode)
-        x_dwt = F.conv2d(x_pad, self.get_fb_conv(c).to(x_pad.device), stride=2, groups=c)
-
-        x_dwt = rearrange(x_dwt, 'b (c f) h w -> b c f h w', f=4)
-        x_ll, x_lh, x_hl, x_hh = x_dwt.split(1, 2)
-        x_dwt = [x_ll.squeeze(2), (x_lh.squeeze(2), x_hl.squeeze(2), x_hh.squeeze(2))]
-
-        return x_dwt
-
-def get_img_dwt(img_dwt, idx=0, nfil=1):
-    img_idx_dwt = [None, None]
-    img_idx_dwt[0] = img_dwt[0][:,idx::nfil].detach().numpy()
-    img_idx_dwt[1] = [img_dwt[1][0][:,idx::nfil].detach().numpy(), img_dwt[1][1][:,idx::nfil].detach().numpy(), img_dwt[1][2][:,idx::nfil].detach().numpy()]
-    return img_idx_dwt
 
 class WaveNetX(nn.Module):
 
@@ -323,21 +373,12 @@ class WaveNetX(nn.Module):
         H_d1 = self.H_Conv_1x1(H_d2)
 
         return M_d1, L_d1, H_d1
-    
-    def get_M_net_params(self):
-        return list(self.M_Conv1.parameters()) + list(self.M_Conv2.parameters()) + list(self.M_Conv3.parameters()) + list(self.M_Conv4.parameters()) + list(self.M_Conv5.parameters()) + \
-               list(self.M_Up_conv5.parameters()) + list(self.M_Up_conv4.parameters()) + list(self.M_Up_conv3.parameters()) + list(self.M_Up_conv2.parameters()) + list(self.M_Conv_1x1.parameters())
-    
-    def get_L_net_params(self):
-        return list(self.L_Conv1.parameters()) + list(self.L_Conv2.parameters()) + list(self.L_Conv3.parameters()) + list(self.L_Conv4.parameters()) + list(self.L_Conv5.parameters()) + \
-               list(self.L_Up_conv5.parameters()) + list(self.L_Up_conv4.parameters()) + list(self.L_Up_conv3.parameters()) + list(self.L_Up_conv2.parameters()) + list(self.L_Conv_1x1.parameters())
-    
-    def get_H_net_params(self):
-        return list(self.H_Conv1.parameters()) + list(self.H_Conv2.parameters()) + list(self.H_Conv3.parameters()) + list(self.H_Conv4.parameters()) + list(self.H_Conv5.parameters()) + \
-               list(self.H_Up_conv5.parameters()) + list(self.H_Up_conv4.parameters()) + list(self.H_Up_conv3.parameters()) + list(self.H_Up_conv2.parameters()) + list(self.H_Conv_1x1.parameters())
-    
-    def get_fusion_params(self):
-        return list(self.M_H_Conv1.parameters()) + list(self.M_H_Conv2.parameters()) + list(self.M_L_Conv3.parameters()) + list(self.M_L_Conv4.parameters())
+
+def get_img_dwt(img_dwt2, fil_idx=0, nfil=1):
+    img_idx_dwt = [None, None]
+    img_idx_dwt[0] = img_dwt2[0][:,fil_idx::nfil].detach().numpy()
+    img_idx_dwt[1] = [img_dwt2[1][0][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][1][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][2][:,fil_idx::nfil].detach().numpy()]
+    return img_idx_dwt
 
 def wavenetx(in_channels, num_classes, flen=8, nfil=16, **kwargs):
     print('Building WaveNetX model with %d %d-tap filters' % (nfil, flen))
@@ -535,11 +576,19 @@ if __name__ == '__main__':
     if '-v' in sys.argv:
         plot_img = True
 
+    plot_img = False
+
+    df = '%+.6f' # decimal format
 
     _current_dir = os.path.dirname(os.path.abspath(__file__))
     image_path = _current_dir+'/../../dataset/GLAS/Test Folder/img/0001.png'
     img = Image.open(image_path)
     img_torch = transforms.ToTensor()(img).unsqueeze(0)
+
+    mask_path = _current_dir+'/../../dataset/GLAS/Test Folder/labelcol/0001.png'
+    mask = Image.open(mask_path)
+    msk_torch = transforms.ToTensor()(mask).reshape(1, 1, mask.size[1], mask.size[0])
+    msk_torch = (msk_torch > 0).float()
 
     print('Image size: ', img_torch.size())
     b, c, h_img, w_img = img_torch.size()
@@ -547,52 +596,124 @@ if __name__ == '__main__':
     rnd_h_off = torch.randint(0, h_img - crop_size + 1, (1,)).item()
     rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
     img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
-
-    nfil = 16
-    rand_dwt_layer = DWT_1lvl(nfil=nfil)
-    img_rand_dwt = rand_dwt_layer(img_crop)
-
-    # if plot_img:
-    #     for idx in range(nfil):
-    #         img_idx_dwt = get_img_dwt(img_rand_dwt, idx=idx, nfil=nfil)
-    #         plot_dwt(img_idx_dwt)
+    msk_crop = msk_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
 
     # test with dwt2 from pywt with db4
     wletstr = 'db4'
     wavelet = pywt.Wavelet(wletstr)
-    img_dwt = pywt.dwt2(img_crop.squeeze().numpy(), wavelet)
-
-    print('LL '+wletstr+':', img_dwt[0].shape)
-    print('LH '+wletstr+':', img_dwt[1][0].shape)
-    print('HL '+wletstr+':', img_dwt[1][1].shape)
-    print('HH '+wletstr+':', img_dwt[1][2].shape)
 
     # plot the DWT filter from wavelet
     dec_lo = wavelet.dec_lo
     dec_hi = wavelet.dec_hi
-    print(' DWT LP '+wletstr+': ', dec_lo)
-    print(' DWT HP '+wletstr+': ', dec_hi)
+    print((' DWT LP '+wletstr+': ' + (df+' ') * len(dec_lo)) % tuple(dec_lo))
+    print(('  \---------> Norm : ' + df) % np.square(dec_lo).sum())
+    print(('   \--------> Sum  : ' + df) % np.sum(dec_lo))
+    print((' DWT HP '+wletstr+': ' + (df+' ') * len(dec_hi)) % tuple(dec_hi))
+    print(('  \---------> Norm : ' + df) % np.square(dec_hi).sum())
+    print(('   \--------> Sum  : ' + df) % np.sum(dec_hi))
     if plot_img:
         plot_fil(dec_lo, dec_hi)
         plot_fil_2d(fil_lo=dec_lo, fil_hi=dec_hi)
 
     rec_lo = wavelet.rec_lo
     rec_hi = wavelet.rec_hi
-    print('IDWT LP '+wletstr+': ', rec_lo)
-    print('IDWT HP '+wletstr+': ', rec_hi)
+    print(('IDWT LP '+wletstr+': ' +(df+' ') * len(rec_lo)) % tuple(rec_lo))
+    print(('  \---------> Norm : ' +df) % np.square(rec_lo).sum())
+    print(('   \--------> Sum  : ' +df) % np.sum(rec_lo))
+    print(('IDWT HP '+wletstr+': ' +(df+' ') * len(rec_hi)) % tuple(rec_hi))
+    print(('  \---------> Norm : ' +df) % np.square(rec_hi).sum())
+    print(('   \--------> Sum  : ' +df) % np.sum(rec_hi))
+    
     if plot_img:
         plot_fil(rec_lo, rec_hi)
         plot_fil_2d(fil_lo=rec_lo, fil_hi=rec_hi)
+
+    img_dwt2 = pywt.dwt2(img_crop.squeeze(0).numpy(), wavelet)
+    msk_dwt2 = pywt.dwt2(msk_crop.squeeze(0).numpy(), wavelet)
     
+
+    if plot_img:
+        plot_dwt(img_dwt2)
+        plot_dwt(msk_dwt2)
+
+    print('LL '+wletstr+' img:', img_dwt2[0].shape)
+    print('LH '+wletstr+' img:', img_dwt2[1][0].shape)
+    print('HL '+wletstr+' img:', img_dwt2[1][1].shape)
+    print('HH '+wletstr+' img:', img_dwt2[1][2].shape)
+    print('LL '+wletstr+' msk:', msk_dwt2[0].shape)
+    print('LH '+wletstr+' msk:', msk_dwt2[1][0].shape)
+    print('HL '+wletstr+' msk:', msk_dwt2[1][1].shape)
+    print('HH '+wletstr+' msk:', msk_dwt2[1][2].shape)
+
+    dwt_layer = DWT_1lvl(fb_lo=wavelet.dec_lo)
+    img_dwt = dwt_layer(img_crop)
+    msk_dwt = dwt_layer(msk_crop)
+
+    print('LL img:', img_dwt[0].shape)
+    print('LH img:', img_dwt[1][0].shape)
+    print('HL img:', img_dwt[1][1].shape)
+    print('HH img:', img_dwt[1][2].shape)
 
     if plot_img:
         plot_dwt(img_dwt)
 
+    # Show mse between pywt and random layer
+    mse_ll = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[0]).unsqueeze(0), img_dwt[0])
+    mse_lh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][0]).unsqueeze(0), img_dwt[1][0])
+    mse_hl = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][1]).unsqueeze(0), img_dwt[1][1])
+    mse_hh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][2]).unsqueeze(0), img_dwt[1][2])
+
+    print(('MSE LL  : '+df+'; MSE LH: '+df+'; MSE HL: '+df+'; MSE HH: '+df) % (mse_ll, mse_lh, mse_hl, mse_hh))
+
+    ## IDWT
+
     # test idwt2 from pywt
-    img_idwt = pywt.idwt2(img_dwt, wavelet)
+    img_idwt2 = pywt.idwt2(img_dwt2, wavelet)
+    msk_idwt2 = pywt.idwt2(msk_dwt2, wavelet)
+
+    if plot_img:
+        plot_idwt(img_idwt2, img_crop)
+        plot_idwt(msk_idwt2, msk_crop)
+
+    idwt_layer = IDWT_1lvl()
+    img_idwt = idwt_layer(img_dwt, dwt_layer.fb_lo, img_crop.shape[1])
+        
+    # show mse between pywt and manual layer
+    mse_idwt = torch.nn.functional.mse_loss(torch.tensor(img_idwt2).unsqueeze(0), img_idwt)
+    print(('MSE IDWT: '+df) % mse_idwt)
 
     if plot_img:
         plot_idwt(img_idwt, img_crop)
+
+    nfil = 16
+    flen = 8    
+    rand_dwt = DWT_1lvl(nfil=nfil, flen=flen)
+
+    img_rand_dwt = rand_dwt(img_crop)
+    msk_rand_dwt = rand_dwt(msk_crop)
+
+    print('LL rand:', img_rand_dwt[0].shape)
+    print('LH rand:', img_rand_dwt[1][0].shape)
+    print('HL rand:', img_rand_dwt[1][1].shape)
+    print('HH rand:', img_rand_dwt[1][2].shape)
+
+    if plot_img:
+        for i in range(nfil):
+            plot_dwt(get_img_dwt(img_rand_dwt, i, nfil))
+            plot_dwt(get_img_dwt(msk_rand_dwt, i, nfil))
+
+
+    rand_idwt = IDWT_1lvl()
+    img_rand_idwt = rand_idwt(img_rand_dwt, rand_dwt.fb_lo, img_crop.shape[1])
+    msk_rand_idwt = rand_idwt(msk_rand_dwt, rand_dwt.fb_lo, msk_crop.shape[1])
+
+    plot_img = True
+
+    print('IDWT rand:', img_rand_idwt.shape)
+
+    if plot_img:
+        plot_idwt(img_rand_idwt, img_crop)
+        plot_idwt(msk_rand_idwt, msk_crop)
 
     if plot_img:
         plt.show()
