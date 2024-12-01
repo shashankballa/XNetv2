@@ -25,25 +25,48 @@ def visual_image_sup(vis, mask_train, pred_train, mask_val, pred_val):
     vis.heatmap(mask_val, win='val_mask', opts=dict(title='Val Mask', colormap='Viridis'))
     vis.heatmap(pred_val, win='val_pred1', opts=dict(title='Val Pred', colormap='Viridis'))
 
-def vis_filter_bank_WaveNetX(vis, fil_lo = None, fil_hi = None, fil_2d = None, figure_name='Filter Bank 2D'):
+def vis_filter_bank_WaveNetX(vis, fil_lo = None, fil_hi = None, fb_2d_list = None, fil_idx = None, figure_name='Filter Bank 2D'):
     fil_ll, fil_lh, fil_hl, fil_hh = None, None, None, None
     
-    if fil_lo is None and fil_hi is None and fil_2d is None:
+    if fil_lo is None and fil_hi is None and fb_2d_list is None:
         raise ValueError('At least one of fil_lo, fil_hi or fil_conv should be provided')
 
-    if fil_2d is not None:
-        if isinstance(fil_2d[0], torch.Tensor):
-            fil_ll = fil_2d[0].detach().cpu()
-            fil_lh = fil_2d[1].detach().cpu()
-            fil_hl = fil_2d[2].detach().cpu()
-            fil_hh = fil_2d[3].detach().cpu()
-        elif isinstance(fil_2d[0], np.ndarray or isinstance(fil_2d[0], list)):
-            fil_ll = torch.tensor(fil_2d[0])
-            fil_lh = torch.tensor(fil_2d[1])
-            fil_hl = torch.tensor(fil_2d[2])
-            fil_hh = torch.tensor(fil_2d[3])
+    if fb_2d_list is not None:
+        _shape = fb_2d_list[0].shape
+        for _fil in fb_2d_list:
+            if not isinstance(_fil, torch.Tensor):
+                raise ValueError('fb_2d_list should be a list of tensors')
+            if _shape != _fil.shape:
+                raise ValueError('All filters in fb_2d_list should have the same shape')
+            
+        if isinstance(fb_2d_list[0], torch.Tensor):
+            fil_ll = fb_2d_list[0].detach().cpu().squeeze()
+            fil_lh = fb_2d_list[1].detach().cpu().squeeze()
+            fil_hl = fb_2d_list[2].detach().cpu().squeeze()
+            fil_hh = fb_2d_list[3].detach().cpu().squeeze()
+        elif isinstance(fb_2d_list[0], np.ndarray or isinstance(fb_2d_list[0], list)):
+            fil_ll = torch.tensor(fb_2d_list[0])
+            fil_lh = torch.tensor(fb_2d_list[1])
+            fil_hl = torch.tensor(fb_2d_list[2])
+            fil_hh = torch.tensor(fb_2d_list[3])
         else:
-            raise ValueError('fil_2d should be a list of tensors or numpy arrays')
+            raise ValueError('fb_2d_list should be a list of tensors or numpy arrays')
+        
+        if (fil_ll.dim() > 3) or (fil_ll.dim() < 2):
+            raise ValueError('fb_2d_list should be a list of 2D or 3D tensors')
+        
+        if fil_ll.dim() == 3:
+            if fil_idx is None:
+                raise ValueError('fil_idx should be provided for 3D filters')
+            if not isinstance(fil_idx, int):
+                raise ValueError('fil_idx should be an integer')
+        
+            fil_idx = fil_idx % fil_ll.shape[0]
+            fil_ll = fil_ll[fil_idx]
+            fil_lh = fil_lh[fil_idx]
+            fil_hl = fil_hl[fil_idx]
+            fil_hh = fil_hh[fil_idx]
+
     elif fil_lo is not None:
         if isinstance(fil_lo, torch.Tensor):
             fil_lo = fil_lo.detach().cpu()

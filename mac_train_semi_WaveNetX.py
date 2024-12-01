@@ -103,17 +103,18 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--vis', default=True, help='need visualization or not')
     parser.add_argument('--visdom_port', default=16672)
     parser.add_argument('--show_args', default=True, help='show the arguments or not')
-    parser.add_argument('--print_net', action='store_true', default=False,
-                        help='print the network or not')
+    parser.add_argument('--print_net', action='store_true', default=False, help='print the network or not')
     parser.add_argument('--bs_step_size', default=100, type=int, help='batch size step')
     parser.add_argument('--max_bs_steps', default=3, type=int, help='maximum number of batch size steps')
-    parser.add_argument('--nfil', default=16, type=int, help='number of filters in the DWT layer')
-    parser.add_argument('--flen', default=8, type=int, help='filter length in the DWT layer')
+    parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
+    parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
+    parser.add_argument('--flen', default=4, type=int, help='filter length in the DWT layer')
+    parser.add_argument('--flen_step', default=4, type=int, help='filter length step size in the DWT layer')
     parser.add_argument('-l1', '--lambda1', default=0, type=float)
     parser.add_argument('-l2', '--lambda2', default=0, type=float)
     parser.add_argument('-fbl', '--fb_loss_wt', default=1, type=float, help='fb hi loss weight')
     parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--ver', default=1, type=int, help='version of WaveNetX')
+    parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
     args = parser.parse_args()
 
     args.ver = min(args.ver, latest_ver)
@@ -236,7 +237,10 @@ if __name__ == '__main__':
     if not skip_unsup:
         num_batches['train_unsup'] = len(dataloaders['train_unsup'])
 
-    model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], nfil=args.nfil, flen=args.flen).to(device)
+    model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
+                            nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
+                            flen_start=args.flen, nfil_start=args.nfil, flen_step=args.flen_step, nfil_step=args.nfil_step # WaveNetXv2
+                            ).to(device)
 
     if args.print_net:
         summary(model1.cpu(), input_size=(cfg['IN_CHANNELS'], cfg['INPUT_SIZE'][0], cfg['INPUT_SIZE'][1]))
@@ -271,6 +275,8 @@ if __name__ == '__main__':
         val_loss_sup_1 = 0.0
         val_loss_sup_2 = 0.0
         val_loss_sup_3 = 0.0
+
+        fb_lambda = fb_lambda * (0.5 ** (epoch // args.step_size))
 
         unsup_weight = args.unsup_weight * (epoch + 1) / args.num_epochs if not skip_unsup else 0
 
@@ -315,8 +321,7 @@ if __name__ == '__main__':
                     #     l1_loss = get_parms_lp_norm(H_params, 1)
                     #     loss_train_unsup += l1_lambda * l1_loss
                 
-                elif args.ver == 1:
-
+                else:
                     pred_train_unsup = model1(img_train_unsup)
                     max_train = torch.max(pred_train_unsup, dim=1)[1].long()
                     loss_train_unsup = criterion(pred_train_unsup, max_train) * unsup_weight
@@ -357,7 +362,7 @@ if __name__ == '__main__':
                 #     loss_train_sup += loss_train_sup3
                 #     train_loss_sup_3 += loss_train_sup3.item()
             
-            elif args.ver == 1:
+            else:
                 pred_train_sup1 = model1(img_train_sup)
                 loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
                 train_loss_sup_1 += loss_train_sup1.item()
@@ -412,7 +417,7 @@ if __name__ == '__main__':
                     val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
                     val_loss_sup_2 += criterion(outputs_val2, mask_val).item()
                     val_loss_sup_3 += criterion(outputs_val3, mask_val).item()
-                elif args.ver == 1:
+                else:
                     outputs_val1 = model1(inputs_val1)
                     val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
 
@@ -432,8 +437,8 @@ if __name__ == '__main__':
                 draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
                 visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)
                 visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
-                for f_idx in range(model1.dwt.fb_lo.shape[0]):
-                    vis_filter_bank_WaveNetX(visdom, fil_lo=model1.dwt.fb_lo[f_idx], figure_name='Filter #{}'.format(f_idx))
+                for f_idx in range(model1.dwt.nfil):
+                    vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
             print('-' * print_num)
             print('| Epoch Time: {:.4f}s'.format((time.time() - begin_time) / args.display_iter).ljust(
                     print_num_minus, ' '), '|')

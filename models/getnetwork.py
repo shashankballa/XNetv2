@@ -2,7 +2,7 @@ import sys
 from models import *
 import torch.nn as nn
 
-def get_network(network, in_channels, num_classes, nfil=16, flen=8, version=1, *args, **kwargs):
+def get_network(network, in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, *args, **kwargs):
 
     # 2d networks
     if network == 'unet':
@@ -19,9 +19,11 @@ def get_network(network, in_channels, num_classes, nfil=16, flen=8, version=1, *
     elif network == 'WaveNetX' or network == 'wavenetx':
         net = wavenetx(in_channels, num_classes, flen=flen, nfil=nfil, version=version)
     elif network.lower() == 'wavenetxv0':
-        net = wavenetx(in_channels, num_classes, flen=flen, nfil=nfil, version=0)
+        net = wavenetx(in_channels, num_classes, version=0, flen=flen, nfil=nfil)
     elif network.lower() == 'wavenetxv1':
-        net = wavenetx(in_channels, num_classes, flen=flen, nfil=nfil, version=1)
+        net = wavenetx(in_channels, num_classes, version=1, flen=flen, nfil=nfil)
+    elif network.lower() == 'wavenetxv2':
+        net = wavenetx(in_channels, num_classes, version=2, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step)
     elif network == 'WaveNetX2' or network == 'wavenetx2':
         net = wavenetx2(in_channels, num_classes, **kwargs)
 
