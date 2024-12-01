@@ -24,8 +24,6 @@ def get_network(network, in_channels, num_classes, version=1, flen=8, nfil=16, f
         net = wavenetx(in_channels, num_classes, version=1, flen=flen, nfil=nfil)
     elif network.lower() == 'wavenetxv2':
         net = wavenetx(in_channels, num_classes, version=2, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step)
-    elif network == 'WaveNetX2' or network == 'wavenetx2':
-        net = wavenetx2(in_channels, num_classes, **kwargs)
 
     else:
         print('the network you have entered is not supported yet')

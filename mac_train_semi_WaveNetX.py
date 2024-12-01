@@ -171,12 +171,11 @@ if __name__ == '__main__':
 
     # Visualization initialization
     if args.vis:
-        visdom_env = str(str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + \
+        visdom_env = str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
-                '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
-                    '-sp=' + str(args.sup_mark) + '-usp=' + str(args.unsup_mark)) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                        '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
-                            '-fbl=' + str(args.fb_loss_wt)
+                '-b=' + str(args.batch_size) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
+                    '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
+                        '-fbl=' + str(args.fb_loss_wt)
         visdom = visdom_initialization_XNetv2(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
@@ -438,7 +437,7 @@ if __name__ == '__main__':
                 visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)
                 visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
                 for f_idx in range(model1.dwt.nfil):
-                    vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
+                    vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
             print('-' * print_num)
             print('| Epoch Time: {:.4f}s'.format((time.time() - begin_time) / args.display_iter).ljust(
                     print_num_minus, ' '), '|')

@@ -103,10 +103,10 @@ def vis_filter_bank_WaveNetX(vis, fil_lo = None, fil_hi = None, fb_2d_list = Non
         fil_hh = torch.einsum('n,m->nm', fil_hi, fil_hi)
 
     # the filters are very small, upsample to visualize
-    fil_ll = F.interpolate(fil_ll.unsqueeze(0).unsqueeze(0), scale_factor=16, mode='nearest').squeeze()
-    fil_lh = F.interpolate(fil_lh.unsqueeze(0).unsqueeze(0), scale_factor=16, mode='nearest').squeeze()
-    fil_hl = F.interpolate(fil_hl.unsqueeze(0).unsqueeze(0), scale_factor=16, mode='nearest').squeeze()
-    fil_hh = F.interpolate(fil_hh.unsqueeze(0).unsqueeze(0), scale_factor=16, mode='nearest').squeeze()
+    fil_ll = torch.repeat_interleave(torch.repeat_interleave(fil_ll, 16, dim=0), 16, dim=1)
+    fil_lh = torch.repeat_interleave(torch.repeat_interleave(fil_lh, 16, dim=0), 16, dim=1)
+    fil_hl = torch.repeat_interleave(torch.repeat_interleave(fil_hl, 16, dim=0), 16, dim=1)
+    fil_hh = torch.repeat_interleave(torch.repeat_interleave(fil_hh, 16, dim=0), 16, dim=1)
 
     # visualize in 2 x 2 grid
     vis.images([fil_ll.unsqueeze(0), fil_lh.unsqueeze(0), fil_hl.unsqueeze(0), fil_hh.unsqueeze(0)], nrow=2, win=figure_name, opts=dict(title=figure_name))
