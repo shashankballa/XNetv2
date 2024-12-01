@@ -6,6 +6,7 @@ from torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
 from models.getnetwork import get_network
+from models.networks_2d.WaveNetX import latest_ver
 import argparse
 import time
 import os
@@ -104,14 +105,19 @@ if __name__ == '__main__':
     parser.add_argument('--show_args', default=True, help='show the arguments or not')
     parser.add_argument('--print_net', action='store_true', default=False,
                         help='print the network or not')
-    parser.add_argument('--bs_step', default=100, type=int, help='batch size step')
+    parser.add_argument('--bs_step_size', default=100, type=int, help='batch size step')
+    parser.add_argument('--max_bs_steps', default=3, type=int, help='maximum number of batch size steps')
     parser.add_argument('--nfil', default=16, type=int, help='number of filters in the DWT layer')
     parser.add_argument('--flen', default=8, type=int, help='filter length in the DWT layer')
     parser.add_argument('-l1', '--lambda1', default=0, type=float)
     parser.add_argument('-l2', '--lambda2', default=0, type=float)
     parser.add_argument('-fbl', '--fb_loss_wt', default=1, type=float, help='fb hi loss weight')
     parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--ver', default=1, type=int, help='version of WaveNetX')
     args = parser.parse_args()
+
+    args.ver = min(args.ver, latest_ver)
+    args.network = args.network +'v' + str(args.ver)
 
     if args.show_args:
         print(args)
@@ -146,8 +152,8 @@ if __name__ == '__main__':
     path_trained_models = path_trained_models + '/' + args.network + '-l=' + str(args.lr) + \
         '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
             '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
-                '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                '-sp=' + str(args.sup_mark) + '-usp=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
+                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
                             '-fbl=' + str(args.fb_loss_wt)
     os.makedirs(path_trained_models, exist_ok=True)
 
@@ -157,18 +163,18 @@ if __name__ == '__main__':
     path_seg_results = path_seg_results + '/' + args.network + '-l=' + str(args.lr) + \
         '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
             '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
-                '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                '-sp=' + str(args.sup_mark) + '-usp=' + str(args.unsup_mark) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
+                    '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
                             '-fbl=' + str(args.fb_loss_wt)
     os.makedirs(path_seg_results, exist_ok=True)
 
     # Visualization initialization
     if args.vis:
-        visdom_env = str('semisup-' + str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + \
+        visdom_env = str(str(dataset_name) + '-' + args.network + '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-uw=' + str(args.unsup_weight) + '-w=' + str(args.warm_up_duration) + \
-                    '-sup=' + str(args.sup_mark) + '-usup=' + str(args.unsup_mark)) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                        '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step) + '-seed=' + str(args.seed) + \
+                    '-sp=' + str(args.sup_mark) + '-usp=' + str(args.unsup_mark)) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
+                        '-l1=' + str(args.lambda1) + '-l2=' + str(args.lambda2) + '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
                             '-fbl=' + str(args.fb_loss_wt)
         visdom = visdom_initialization_XNetv2(env=visdom_env, port=args.visdom_port)
 
@@ -268,45 +274,52 @@ if __name__ == '__main__':
 
         unsup_weight = args.unsup_weight * (epoch + 1) / args.num_epochs if not skip_unsup else 0
 
-        bs_step = 'train_sup_' + str(min(epoch // args.bs_step, 3))
+        bs_step_size = 'train_sup_' + str(min(epoch // args.bs_step_size, args.max_bs_steps))
 
-        dataset_train_sup = iter(dataloaders[bs_step])
+        dataset_train_sup = iter(dataloaders[bs_step_size])
 
         if not skip_unsup:
             dataset_train_unsup = iter(dataloaders['train_unsup'])
 
-        for i in range(num_batches[bs_step]):
+        for i in range(num_batches[bs_step_size]):
 
             loss_train = 0.0
             optimizer1.zero_grad()
 
             if not skip_unsup:
                 unsup_index = next(dataset_train_unsup)
-                img_train_unsup1 = Variable(unsup_index['image'].to(device))
+                img_train_unsup = Variable(unsup_index['image'].to(device))
+                loss_train_unsup = 0  
 
-                pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup1)
+                if args.ver == 0:
+                    pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup)
 
-                max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
-                max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
-                max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
-                loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
-                                criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
+                    max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
+                    max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
+                    max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
+                    loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
+                                    criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
+                    loss_train_unsup = loss_train_unsup * unsup_weight
 
-                loss_train_unsup = loss_train_unsup * unsup_weight
+                    # L2 regularization for M, L, and Fusion network parameters
+                    # if l2_lambda > 0:
+                    #     M_params = model1.get_M_net_params()
+                    #     L_params = model1.get_L_net_params()
+                    #     Fusion_params = model1.get_fusion_params()
+                    #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
+                    #     loss_train_unsup += l2_lambda * l2_loss
 
-                # L2 regularization for M, L, and Fusion network parameters
-                # if l2_lambda > 0:
-                #     M_params = model1.get_M_net_params()
-                #     L_params = model1.get_L_net_params()
-                #     Fusion_params = model1.get_fusion_params()
-                #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
-                #     loss_train_unsup += l2_lambda * l2_loss
+                    # # L1 regularization for H network parameters
+                    # if l1_lambda > 0:
+                    #     H_params = model1.get_H_net_params()
+                    #     l1_loss = get_parms_lp_norm(H_params, 1)
+                    #     loss_train_unsup += l1_lambda * l1_loss
+                
+                elif args.ver == 1:
 
-                # # L1 regularization for H network parameters
-                # if l1_lambda > 0:
-                #     H_params = model1.get_H_net_params()
-                #     l1_loss = get_parms_lp_norm(H_params, 1)
-                #     loss_train_unsup += l1_lambda * l1_loss
+                    pred_train_unsup = model1(img_train_unsup)
+                    max_train = torch.max(pred_train_unsup, dim=1)[1].long()
+                    loss_train_unsup = criterion(pred_train_unsup, max_train) * unsup_weight
 
                 fb_hi_loss_unsup = model1.dwt.get_fb_hi_loss()
                 loss_train_unsup += fb_hi_loss_unsup * fb_lambda
@@ -316,46 +329,43 @@ if __name__ == '__main__':
                 train_loss_unsup += loss_train_unsup.item()
 
             sup_index = next(dataset_train_sup)
-            img_train_sup1 = Variable(sup_index['image'].to(device))
-            mask_train_sup = Variable(sup_index['mask'].to(device))
-            bin_mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
+            img_train_sup = Variable(sup_index['image'].to(device))
+            mask_train_sup = Variable(sup_index['bin_mask'].to(device).long()) #Variable(sup_index['mask'].to(device))
+            loss_train_sup1, loss_train_sup2, loss_train_sup3 = 0, 0, 0
 
-            pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup1)
+            if args.ver == 0:
+                pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup)
+                loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup) + criterion(pred_train_sup2, mask_train_sup) + criterion(pred_train_sup3, mask_train_sup)
+                train_loss_sup_1 += loss_train_sup1.item()
+                loss_train_sup = loss_train_sup1
 
-            if (count_iter % args.display_iter == 0) or args.vis:
-                if i == 0:
-                    score_list_train1 = pred_train_sup1
-                    mask_list_train = mask_train_sup
-                elif 0 < i <= num_batches[bs_step] / 64:
-                    score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
-                    mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
+                loss_train_sup2 = 0
+                # if l2_lambda > 0:
+                #     M_params = model1.get_M_net_params()
+                #     L_params = model1.get_L_net_params()
+                #     Fusion_params = model1.get_fusion_params()
+                #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
+                #     loss_train_sup2 = l2_lambda * l2_loss
+                #     loss_train_sup += loss_train_sup2
+                #     train_loss_sup_2 += loss_train_sup2.item()
 
-            loss_train_sup1 = criterion(pred_train_sup1, bin_mask_train_sup) + criterion(pred_train_sup2, bin_mask_train_sup) + criterion(pred_train_sup3, bin_mask_train_sup)
-            train_loss_sup_1 += loss_train_sup1.item()
+                loss_train_sup3 = 0
+                # if l1_lambda > 0:
+                #     H_params = model1.get_H_net_params()
+                #     l1_loss = get_parms_lp_norm(H_params, 1)
+                #     loss_train_sup3 += l1_lambda * l1_loss
+                #     loss_train_sup += loss_train_sup3
+                #     train_loss_sup_3 += loss_train_sup3.item()
+            
+            elif args.ver == 1:
+                pred_train_sup1 = model1(img_train_sup)
+                loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
+                train_loss_sup_1 += loss_train_sup1.item()
+                loss_train_sup = loss_train_sup1
 
-            loss_train_sup = loss_train_sup1
-
-            loss_train_sup2 = 0
             fb_hi_loss_sup = model1.dwt.get_fb_hi_loss()
             loss_train_sup2 = fb_hi_loss_sup * fb_lambda
             train_loss_sup_2 += loss_train_sup2.item()
-            # if l2_lambda > 0:
-            #     M_params = model1.get_M_net_params()
-            #     L_params = model1.get_L_net_params()
-            #     Fusion_params = model1.get_fusion_params()
-            #     l2_loss = get_parms_lp_norm(M_params, 2) + get_parms_lp_norm(L_params, 2) + get_parms_lp_norm(Fusion_params, 2)
-            #     loss_train_sup2 = l2_lambda * l2_loss
-            #     loss_train_sup += loss_train_sup2
-            #     train_loss_sup_2 += loss_train_sup2.item()
-
-            loss_train_sup3 = 0
-            # if l1_lambda > 0:
-            #     H_params = model1.get_H_net_params()
-            #     l1_loss = get_parms_lp_norm(H_params, 1)
-            #     loss_train_sup3 += l1_lambda * l1_loss
-            #     loss_train_sup += loss_train_sup3
-            #     train_loss_sup_3 += loss_train_sup3.item()
-
             loss_train_sup += loss_train_sup2
 
             loss_train_sup.backward()
@@ -365,6 +375,14 @@ if __name__ == '__main__':
             loss_train += loss_train_sup
             train_loss += loss_train.item()
 
+            if (count_iter % args.display_iter == 0) or args.vis:
+                if i == 0:
+                    score_list_train1 = pred_train_sup1
+                    mask_list_train = mask_train_sup
+                elif 0 < i <= num_batches[bs_step_size] / 64:
+                    score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
+                    mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
+
         scheduler_warmup1.step()
 
         # Visualization and printing training statistics
@@ -372,7 +390,7 @@ if __name__ == '__main__':
             print('=' * print_num)
             print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' ') + '|')
             train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_epoch_loss = print_train_loss_XNetv2(
-                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss_unsup, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_step]
+                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss_unsup, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_step_size]
             )
             train_eval_list1, train_m_jc1 = print_train_eval_sup(
                 cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus
@@ -384,12 +402,19 @@ if __name__ == '__main__':
             for i, data in enumerate(dataloaders['val']):
 
                 inputs_val1 = Variable(data['image'].to(device))
-                mask_val = Variable(data['mask'].to(device))
-                bin_mask_val = Variable(data['bin_mask'].to(device).long())
+                mask_val = Variable(data['bin_mask'].to(device).long())#Variable(data['mask'].to(device))
                 name_val = data['ID']
 
                 optimizer1.zero_grad()
-                outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1)
+
+                if args.ver == 0:
+                    outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1)
+                    val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
+                    val_loss_sup_2 += criterion(outputs_val2, mask_val).item()
+                    val_loss_sup_3 += criterion(outputs_val3, mask_val).item()
+                elif args.ver == 1:
+                    outputs_val1 = model1(inputs_val1)
+                    val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
 
                 if i == 0:
                     score_list_val1 = outputs_val1
@@ -399,13 +424,6 @@ if __name__ == '__main__':
                     score_list_val1 = torch.cat((score_list_val1, outputs_val1), dim=0)
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
-
-                loss_val_sup1 = criterion(outputs_val1, bin_mask_val)
-                loss_val_sup2 = criterion(outputs_val2, bin_mask_val)
-                loss_val_sup3 = criterion(outputs_val3, bin_mask_val)
-                val_loss_sup_1 += loss_val_sup1.item()
-                val_loss_sup_2 += loss_val_sup2.item()
-                val_loss_sup_3 += loss_val_sup3.item()
 
             val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3 = print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_batches, print_num, print_num_minus)
             val_eval_list1, val_m_jc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)

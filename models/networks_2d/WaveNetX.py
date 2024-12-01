@@ -86,10 +86,13 @@ class DWT_1lvl(nn.Module):
         return x_ll, (x_lh, x_hl, x_hh)
 
 class IDWT_1lvl(nn.Module):
-    def __init__(self):
+    def __init__(self, out_channels=1):
         super(IDWT_1lvl, self).__init__()
+        self.out_channels = out_channels
     
-    def get_fb_conv_list(self, dwt_fb_lo, out_channels):
+    def get_fb_conv_list(self, dwt_fb_lo, out_channels = None):
+        if out_channels is None:
+            out_channels = self.out_channels
         fb_lo = F.normalize(dwt_fb_lo, p=2, dim=-1)
         # Generate high-pass filters by flipping and changing signs
         fb_hi = fb_lo.flip(-1)
@@ -127,7 +130,9 @@ class IDWT_1lvl(nn.Module):
             x = x[..., :-padr]
         return x
     
-    def forward(self, x: Tuple, dwt_fb_lo: torch.Tensor, out_channels: int) -> torch.Tensor:
+    def forward(self, x: Tuple, dwt_fb_lo: torch.Tensor, out_channels: int = None) -> torch.Tensor:
+        if out_channels is None:
+            out_channels = self.out_channels
         fb = self.get_fb_conv_list(dwt_fb_lo, out_channels)
         x_idwt = F.conv_transpose2d(x[0], fb[0].to(x[0].device), stride=2, groups=out_channels) + \
                     F.conv_transpose2d(x[1][0], fb[1].to(x[1][0].device), stride=2, groups=out_channels) + \
@@ -192,10 +197,10 @@ class up_conv(nn.Module):
         x = self.up(x)
         return x
 
-class WaveNetX(nn.Module):
+class WaveNetXv0(nn.Module):
 
     def __init__(self, in_channels=3, num_classes=1, fb_lo=None, flen=8, nfil=1):
-        super(WaveNetX, self).__init__()
+        super(WaveNetXv0, self).__init__()
 
         # wavelet block
         self.dwt = DWT_1lvl(fb_lo=fb_lo, flen=flen, nfil=nfil)
@@ -374,15 +379,214 @@ class WaveNetX(nn.Module):
 
         return M_d1, L_d1, H_d1
 
+
+class WaveNetXv1(nn.Module):
+
+    def __init__(self, in_channels=3, num_classes=1, fb_lo=None, flen=8, nfil=1):
+        super(WaveNetXv1, self).__init__()
+
+        # wavelet block
+        self.dwt = DWT_1lvl(fb_lo=fb_lo, flen=flen, nfil=nfil)
+        self.idwt = IDWT_1lvl(out_channels=num_classes)
+    
+        # main network
+        self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.M_Conv1 = conv_block(ch_in=in_channels, ch_out=64)
+        self.M_Conv2 = conv_block(ch_in=64, ch_out=128)
+        self.M_Conv3 = conv_block(ch_in=128, ch_out=256)
+        self.M_Conv4 = conv_block(ch_in=256, ch_out=512)
+        self.M_Conv5 = conv_block(ch_in=512, ch_out=1024)
+
+        self.M_Up5 = up_conv(ch_in=1024, ch_out=512)
+        self.M_Up_conv5 = conv_block(ch_in=1024, ch_out=512)
+        self.M_Up4 = up_conv(ch_in=512, ch_out=256)
+        self.M_Up_conv4 = conv_block(ch_in=512, ch_out=256)
+        self.M_Up3 = up_conv(ch_in=256, ch_out=128)
+        self.M_Up_conv3 = conv_block(ch_in=256, ch_out=128)
+        self.M_Up2 = up_conv(ch_in=128, ch_out=64)
+        self.M_Up_conv2 = conv_block(ch_in=128, ch_out=64)
+        self.M_Conv_1x1 = nn.Conv2d(64, num_classes, kernel_size=1, stride=1, padding=0)
+
+        # L network
+        self.L_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.L_Conv1 = conv_block(ch_in=nfil*in_channels, ch_out=64)
+        self.L_Conv2 = conv_block(ch_in=64, ch_out=128)
+        self.L_Conv3 = conv_block(ch_in=128, ch_out=256)
+        self.L_Conv4 = conv_block(ch_in=256, ch_out=512)
+        self.L_Conv5 = conv_block(ch_in=512, ch_out=1024)
+
+        self.L_Up5 = up_conv(ch_in=1024, ch_out=512)
+        self.L_Up_conv5 = conv_block(ch_in=1024, ch_out=512)
+        self.L_Up4 = up_conv(ch_in=512, ch_out=256)
+        self.L_Up_conv4 = conv_block(ch_in=512, ch_out=256)
+        self.L_Up3 = up_conv(ch_in=256, ch_out=128)
+        self.L_Up_conv3 = conv_block(ch_in=256, ch_out=128)
+        self.L_Up2 = up_conv(ch_in=128, ch_out=64)
+        self.L_Up_conv2 = conv_block(ch_in=128, ch_out=64)
+        self.L_Conv_1x1 = nn.Conv2d(64, nfil*num_classes, kernel_size=1, stride=1, padding=0)
+
+        # H network
+        self.H_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.H_Conv1 = conv_block(ch_in=nfil*3*in_channels, ch_out=64)
+        self.H_Conv2 = conv_block(ch_in=64, ch_out=128)
+        self.H_Conv3 = conv_block(ch_in=128, ch_out=256)
+        self.H_Conv4 = conv_block(ch_in=256, ch_out=512)
+        self.H_Conv5 = conv_block(ch_in=512, ch_out=1024)
+
+        self.H_Up5 = up_conv(ch_in=1024, ch_out=512)
+        self.H_Up_conv5 = conv_block(ch_in=1024, ch_out=512)
+        self.H_Up4 = up_conv(ch_in=512, ch_out=256)
+        self.H_Up_conv4 = conv_block(ch_in=512, ch_out=256)
+        self.H_Up3 = up_conv(ch_in=256, ch_out=128)
+        self.H_Up_conv3 = conv_block(ch_in=256, ch_out=128)
+        self.H_Up2 = up_conv(ch_in=128, ch_out=64)
+        self.H_Up_conv2 = conv_block(ch_in=128, ch_out=64)
+        self.H_Conv_1x1 = nn.Conv2d(64, 3*nfil*num_classes, kernel_size=1, stride=1, padding=0)
+
+        # fusion
+        self.M_H_Conv1 = conv_block(ch_in=128, ch_out=64)
+        self.M_H_Conv2 = conv_block(ch_in=256, ch_out=128)
+        self.M_L_Conv3 = conv_block(ch_in=512, ch_out=256)
+        self.M_L_Conv4 = conv_block(ch_in=1024, ch_out=512)
+
+    def forward(self, x_main, *args, **kwargs): #ignore excess
+        # main encoder
+
+        x_L, (x_LH, x_HL, x_HH) = self.dwt(x_main)
+        # x_H = x_HL + x_LH + x_HH
+
+        x_H = torch.cat((x_LH, x_HL, x_HH), dim=1)
+
+        # Resize x_L and x_H to match the spatial dimensions of x_main
+        x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+
+        M_x1 = self.M_Conv1(x_main)
+        M_x2 = self.M_Maxpool(M_x1)
+        M_x2 = self.M_Conv2(M_x2)
+        M_x3 = self.M_Maxpool(M_x2)
+        M_x3 = self.M_Conv3(M_x3)
+        M_x4 = self.M_Maxpool(M_x3)
+        M_x4 = self.M_Conv4(M_x4)
+        M_x5 = self.M_Maxpool(M_x4)
+        M_x5 = self.M_Conv5(M_x5)
+
+        # L encoder
+        L_x1 = self.L_Conv1(x_L)
+        L_x2 = self.L_Maxpool(L_x1)
+        L_x2 = self.L_Conv2(L_x2)
+        L_x3 = self.L_Maxpool(L_x2)
+        L_x3 = self.L_Conv3(L_x3)
+        L_x4 = self.L_Maxpool(L_x3)
+        L_x4 = self.L_Conv4(L_x4)
+        L_x5 = self.L_Maxpool(L_x4)
+        L_x5 = self.L_Conv5(L_x5)
+
+        # H encoder
+        H_x1 = self.H_Conv1(x_H)
+        H_x2 = self.H_Maxpool(H_x1)
+        H_x2 = self.H_Conv2(H_x2)
+        H_x3 = self.H_Maxpool(H_x2)
+        H_x3 = self.H_Conv3(H_x3)
+        H_x4 = self.H_Maxpool(H_x3)
+        H_x4 = self.H_Conv4(H_x4)
+        H_x5 = self.H_Maxpool(H_x4)
+        H_x5 = self.H_Conv5(H_x5)
+
+        # fusion
+        M_H_x1 = torch.cat((M_x1, H_x1), dim=1)
+        M_H_x1 = self.M_H_Conv1(M_H_x1)
+        M_H_x2 = torch.cat((M_x2, H_x2), dim=1)
+        M_H_x2 = self.M_H_Conv2(M_H_x2)
+        M_L_x3 = torch.cat((M_x3, L_x3), dim=1)
+        M_L_x3 = self.M_L_Conv3(M_L_x3)
+        M_L_x4 = torch.cat((M_x4, L_x4), dim=1)
+        M_L_x4 = self.M_L_Conv4(M_L_x4)
+
+        # main decoder
+
+        M_d5 = self.M_Up5(M_x5)
+        M_d5 = torch.cat((M_L_x4, M_d5), dim=1)
+        M_d5 = self.M_Up_conv5(M_d5)
+
+        M_d4 = self.M_Up4(M_d5)
+        M_d4 = torch.cat((M_L_x3, M_d4), dim=1)
+        M_d4 = self.M_Up_conv4(M_d4)
+
+        M_d3 = self.M_Up3(M_d4)
+        M_d3 = torch.cat((M_H_x2, M_d3), dim=1)
+        M_d3 = self.M_Up_conv3(M_d3)
+
+        M_d2 = self.M_Up2(M_d3)
+        M_d2 = torch.cat((M_H_x1, M_d2), dim=1)
+        M_d2 = self.M_Up_conv2(M_d2)
+        M_d1 = self.M_Conv_1x1(M_d2)
+
+        # L decoder
+        L_d5 = self.L_Up5(L_x5)
+        L_d5 = torch.cat((M_L_x4, L_d5), dim=1)
+        L_d5 = self.L_Up_conv5(L_d5)
+
+        L_d4 = self.L_Up4(L_d5)
+        L_d4 = torch.cat((M_L_x3, L_d4), dim=1)
+        L_d4 = self.L_Up_conv4(L_d4)
+
+        L_d3 = self.L_Up3(L_d4)
+        L_d3 = torch.cat((L_x2, L_d3), dim=1)
+        L_d3 = self.L_Up_conv3(L_d3)
+
+        L_d2 = self.L_Up2(L_d3)
+        L_d2 = torch.cat((L_x1, L_d2), dim=1)
+        L_d2 = self.L_Up_conv2(L_d2)
+
+        L_d1 = self.L_Conv_1x1(L_d2) # ll component
+
+        # H decoder
+        H_d5 = self.H_Up5(H_x5)
+        H_d5 = torch.cat((H_x4, H_d5), dim=1)
+        H_d5 = self.H_Up_conv5(H_d5)
+
+        H_d4 = self.H_Up4(H_d5)
+        H_d4 = torch.cat((H_x3, H_d4), dim=1)
+        H_d4 = self.H_Up_conv4(H_d4)
+
+        H_d3 = self.H_Up3(H_d4)
+        H_d3 = torch.cat((M_H_x2, H_d3), dim=1)
+        H_d3 = self.H_Up_conv3(H_d3)
+
+        H_d2 = self.H_Up2(H_d3)
+        H_d2 = torch.cat((M_H_x1, H_d2), dim=1)
+        H_d2 = self.H_Up_conv2(H_d2)
+
+        H_d1 = self.H_Conv_1x1(H_d2) # lh, hl, hh components
+        
+        # split H_d1 into LH, HL, HH components
+        H_d1 = H_d1.chunk(3, dim=1)
+
+        # IDWT
+        M_d0 = self.idwt([L_d1, H_d1], self.dwt.fb_lo) 
+
+        # shrink M_d0 to the original size
+        M_d0 = F.interpolate(M_d0, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        
+        return M_d1 + M_d0
+    
+latest_ver = 1
+
 def get_img_dwt(img_dwt2, fil_idx=0, nfil=1):
     img_idx_dwt = [None, None]
     img_idx_dwt[0] = img_dwt2[0][:,fil_idx::nfil].detach().numpy()
     img_idx_dwt[1] = [img_dwt2[1][0][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][1][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][2][:,fil_idx::nfil].detach().numpy()]
     return img_idx_dwt
 
-def wavenetx(in_channels, num_classes, flen=8, nfil=16, **kwargs):
-    print('Building WaveNetX model with %d %d-tap filters' % (nfil, flen))
-    model = WaveNetX(in_channels, num_classes, flen=flen, nfil=nfil)
+def wavenetx(in_channels, num_classes, flen=8, nfil=16, version=1, **kwargs):
+    if version > latest_ver:
+        raise ValueError(('WaveNetXv%d model is not available yet') % version)
+    print(('Building WaveNetXv'+str(version)+' model with %d %d-tap filters') % (nfil, flen))
+    if version == 0:
+        model = WaveNetXv0(in_channels, num_classes, flen=flen, nfil=nfil)
+    elif version == 1:
+        model = WaveNetXv1(in_channels, num_classes, flen=flen, nfil=nfil)
     init_weights(model, 'kaiming')
     return model
 
@@ -593,10 +797,13 @@ if __name__ == '__main__':
     print('Image size: ', img_torch.size())
     b, c, h_img, w_img = img_torch.size()
     crop_size = 512
+    _resize = 128
     rnd_h_off = torch.randint(0, h_img - crop_size + 1, (1,)).item()
     rnd_w_off = torch.randint(0, w_img - crop_size + 1, (1,)).item()
     img_crop = img_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
+    img_crop = transforms.Resize((_resize, _resize))(img_crop)
     msk_crop = msk_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
+    msk_crop = transforms.Resize((_resize, _resize))(msk_crop)
 
     # test with dwt2 from pywt with db4
     wletstr = 'db4'
@@ -714,6 +921,23 @@ if __name__ == '__main__':
     if plot_img:
         plot_idwt(img_rand_idwt, img_crop)
         plot_idwt(msk_rand_idwt, msk_crop)
+
+    # test WaveNetX
+
+    model = WaveNetXv1(in_channels=3, num_classes=2, flen=8, nfil=16)
+
+    pred = model(img_crop)
+
+    if plot_img:
+        plt.figure()
+        plt.subplot(1, 2, 1)
+        plt.imshow(pred[0,0].detach().cpu().numpy(), cmap='gray')
+        plt.title('Channel 0')
+        plt.axis('off')
+        plt.subplot(1, 2, 2)
+        plt.imshow(pred[0,1].detach().cpu().numpy(), cmap='gray')
+        plt.title('Channel 1')
+        plt.axis('off')
 
     if plot_img:
         plt.show()
