@@ -78,9 +78,6 @@ if __name__ == '__main__':
     if args.show_args:
         print(args)
 
-    fb_l0 = args.fbl0 * 1e-1
-    fb_l1 = args.fbl1 * 1e-1
-
     # Set device to MPS or CPU
     device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     if args.use_cpu:
@@ -102,8 +99,8 @@ if __name__ == '__main__':
     path_trained_models = path_trained_models + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
-                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                        '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
+                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
+                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
                             '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
     os.makedirs(path_trained_models, exist_ok=True)
 
@@ -113,8 +110,8 @@ if __name__ == '__main__':
     path_seg_results = path_seg_results + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
-                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                        '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
+                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
+                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
                             '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
     os.makedirs(path_seg_results, exist_ok=True)
 
@@ -123,7 +120,7 @@ if __name__ == '__main__':
         visdom_env = args.network + '-adaVal' + '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
+                    '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
                         '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
         visdom = visdom_initialization_WaveNetX(env=visdom_env, port=args.visdom_port)
 
@@ -167,7 +164,7 @@ if __name__ == '__main__':
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
-                            flen_start=args.flen, nfil_start=args.nfil, flen_step=args.flen_step, nfil_step=args.nfil_step # WaveNetXv2
+                            nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step # WaveNetXv2
                             ).to(device)
 
     if args.print_net:
@@ -204,8 +201,11 @@ if __name__ == '__main__':
         val_loss_sup_2 = 0.0
         val_loss_sup_3 = 0.0
 
-        # fb_l0 = fb_l0 * (0.5 ** (epoch // args.step_size))
-        # fb_l1 = fb_l1 * (0.5 ** (epoch // args.step_size))
+        fb_l0 = args.fbl0 * 1e-1
+        fb_l1 = args.fbl1 * 1e-1
+
+        fb_l0 *= (1.0+args.gamma) ** (epoch // args.step_size)
+        fb_l1 *= (1.0+args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
         if args.big2small:
@@ -312,8 +312,7 @@ if __name__ == '__main__':
                 for f_idx in range(model1.dwt.nfil):
                     vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
             print('-' * print_num)
-            print('| Epoch Time: {:.4f}s'.format((time.time() - begin_time) / args.display_iter).ljust(
-                    print_num_minus, ' '), '|')
+            print('| Epoch Time: {:.4f}s  BS: {:2d}  |'.format((time.time() - begin_time), args.batch_size).ljust(print_num_minus, ' '), '|')
     
     time_elapsed = time.time() - since
     m, s = divmod(time_elapsed, 60)

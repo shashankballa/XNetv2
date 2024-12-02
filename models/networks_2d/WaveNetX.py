@@ -166,9 +166,11 @@ class IDWT_1lvl(nn.Module):
         x_idwt = self.safe_unpad(x_idwt, flen)
         return x_idwt
 
+NFLENS = 8
+
 class DWT_mtap(nn.Module):
 
-    def __init__(self, nflens=4 , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None,
+    def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None,
                  pad_mode="replicate"):
         '''
         DWT_mtap: 1-level DWT with multi-tap Quadrature Mirror Filter Banks
@@ -186,7 +188,7 @@ class DWT_mtap(nn.Module):
         if (flen_start % 2 ) + (flen_step % 2) > 0:
             raise ValueError('Filter length `flen_start` and its step size `flen_start` should be even numbers')
 
-        self.nflens = 4 # nflens 
+        self.nflens = NFLENS # nflens 
         self.flen_step = flen_step
         self.flens = torch.tensor([flen_start + self.flen_step*i for i in range(self.nflens)])
         self.flen_max = torch.max(self.flens)
@@ -198,11 +200,15 @@ class DWT_mtap(nn.Module):
         self.fb_los1 = nn.Parameter(torch.rand((self.nfils[1], self.flens[1])))
         self.fb_los2 = nn.Parameter(torch.rand((self.nfils[2], self.flens[2])))
         self.fb_los3 = nn.Parameter(torch.rand((self.nfils[3], self.flens[3])))
+        self.fb_los4 = nn.Parameter(torch.rand((self.nfils[4], self.flens[4])))
+        self.fb_los5 = nn.Parameter(torch.rand((self.nfils[5], self.flens[5])))
+        self.fb_los6 = nn.Parameter(torch.rand((self.nfils[6], self.flens[6])))
+        self.fb_los7 = nn.Parameter(torch.rand((self.nfils[7], self.flens[7])))
         self.pad_mode = pad_mode
         self.inp_channels = inp_channels
     
     def get_fb_lo_list(self):
-        return [self.fb_los0, self.fb_los1, self.fb_los2, self.fb_los3]
+        return [self.fb_los0, self.fb_los1, self.fb_los2, self.fb_los3, self.fb_los4, self.fb_los5, self.fb_los6, self.fb_los7]
     
     def get_pads(self, x_shape):
         padb = (2 * self.flen_max - 3) // 2
@@ -722,11 +728,11 @@ class WaveNetXv1(nn.Module):
 
 class WaveNetXv2(nn.Module):
 
-    def __init__(self, in_channels=3, num_classes=1, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=4):
+    def __init__(self, in_channels=3, num_classes=1, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS):
         super(WaveNetXv2, self).__init__()
 
         # wavelet block
-        self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=4, inp_channels=in_channels)
+        self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=NFLENS, inp_channels=in_channels)
         self.idwt = IDWT_1lvl(out_channels=num_classes)
     
         # main network
@@ -919,7 +925,7 @@ def get_img_dwt(img_dwt2, fil_idx=0, nfil=1):
     img_idx_dwt[1] = [img_dwt2[1][0][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][1][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][2][:,fil_idx::nfil].detach().numpy()]
     return img_idx_dwt
 
-def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=4):
+def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS):
     if version > latest_ver:
         raise ValueError(('WaveNetXv%d model is not available yet') % version)
     if version >= 2:
