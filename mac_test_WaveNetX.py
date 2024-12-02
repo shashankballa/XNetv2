@@ -11,7 +11,7 @@ from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from dataload.dataset_2d import imagefolder_WaveNetX
 from models.getnetwork import get_network
 from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, vis_filter_bank_WaveNetX
-from config.train_test_config.train_test_config import print_val_eval_sup, save_val_best_sup_2d, print_val_loss_XNetv2
+from config.train_test_config.train_test_config import print_test_eval, save_val_best_sup_2d, print_val_loss_XNetv2, save_test_2d
 from loss.loss_function import segmentation_loss
 from warnings import simplefilter
 
@@ -67,6 +67,8 @@ if __name__ == '__main__':
     parser.add_argument('--wavelet_type', default='haar', help='haar, db2, bior1.5, coif1, dmey')
     parser.add_argument('--alpha', default=[0, 0.4])
     parser.add_argument('--beta', default=[0.5, 0.8])
+    parser.add_argument('-n', '--network', default='WaveNetXv2', type=str)
+    parser.add_argument('--threshold', default=0.5, type=float)
     args = parser.parse_args()
 
     # Parse model parameters from the filename
@@ -111,7 +113,7 @@ if __name__ == '__main__':
     dataloaders = {'test': DataLoader(dataset_test, batch_size=batch_size, shuffle=False)}
 
     # Model
-    network_name = model_params.get('network', 'WaveNetXv2')
+    network_name = args.network
     model = get_network(
         network_name,
         cfg['IN_CHANNELS'],
@@ -170,6 +172,7 @@ if __name__ == '__main__':
                 mask_list_test = torch.cat((mask_list_test, mask_test), dim=0)
                 name_list_test = np.append(name_list_test, name_test, axis=0)
 
+            save_test_2d(cfg['NUM_CLASSES'], outputs_test1, name_test, args.threshold, results_path, cfg['PALETTE'])
             # Visualization of filter banks
             if args.vis:
                 for f_idx in range(model1.dwt.nfil):
@@ -186,6 +189,6 @@ if __name__ == '__main__':
         test_epoch_loss_sup1, test_epoch_loss_sup2, test_epoch_loss_sup3 = print_val_loss_XNetv2(
             test_loss_sup_1, test_loss_sup_2, test_loss_sup_3, num_batches, print_num, print_num_minus
         )
-        test_eval_list, test_m_jc, test_m_dice = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_test1, mask_list_test, print_num_minus)
+        test_eval_list, test_m_jc, test_m_dice = print_test_eval(cfg['NUM_CLASSES'], score_list_test1, mask_list_test, print_num)
 
     print("Testing complete.")
