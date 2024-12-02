@@ -204,7 +204,7 @@ if __name__ == '__main__':
         fb_l0 = args.fbl0 * 1e-1
         fb_l1 = args.fbl1 * 1e-1
 
-        fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
+        fb_l0 *= (0.6+args.gamma) ** (epoch // args.step_size)
         fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
