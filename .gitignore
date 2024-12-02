@@ -3,7 +3,10 @@ dataset_tiff/
 __pycache__/
 checkpoints/
 .idea/
+
+.pyenv/
 pyenv/
+
 seg_pred/
 data/
 .DS_Store

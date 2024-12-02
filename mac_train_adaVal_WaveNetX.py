@@ -17,9 +17,9 @@ from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from loss.loss_function import segmentation_loss
 from dataload.dataset_2d import imagefolder_WaveNetX
-from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, visualization_XNetv2, visual_image_sup, vis_filter_bank_WaveNetX
+from config.visdom_config.visual_visdom import visdom_initialization_WaveNetX, visualization_WaveNetX, visual_image_sup, vis_filter_bank_WaveNetX
 from config.warmup_config.warmup import GradualWarmupScheduler
-from config.train_test_config.train_test_config import print_train_loss_XNetv2, print_val_loss_XNetv2, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
+from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
 from warnings import simplefilter
 from torchsummary import summary
 
@@ -31,64 +31,15 @@ def init_seeds(seed):
     np.random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(0)
 
-def compute_p_norm_conv_kernel(params, p=2):
-    """
-    Compute the L1 or L2 norm of a 4D convolutional kernel across the last two dimensions
-    and sum the results for all filters.
-
-    Args:
-        params (torch.Tensor): 4D tensor of shape (out_channels, in_channels, kernel_height, kernel_width)
-        p (int): Norm type (1 for L1 norm, 2 for L2 norm)
-
-    Returns:
-        torch.Tensor: Scalar p-norm value summed across all filters.
-    """
-    if params.dim() != 4:
-        raise ValueError("Expected a 4D tensor, got tensor with shape {}".format(params.shape))
-
-    if p == 1:
-        # Compute the absolute sum over the last two dimensions (kernel_height, kernel_width)
-        abs_sum = torch.sum(torch.abs(params), dim=(2, 3))
-        total_p_norm = torch.max(abs_sum)
-    elif p == 2:
-        # Compute the squared sum over the last two dimensions (kernel_height, kernel_width)
-        squared_sum = torch.sum(params ** 2, dim=(2, 3))
-        # Compute the square root to get the L2 norm for each kernel
-        l2_norms = torch.sqrt(squared_sum)
-        # Sum the L2 norms across all input and output channels
-        total_p_norm = torch.sum(l2_norms)
-    else:
-        raise ValueError("Only p=1 (L1 norm) and p=2 (L2 norm) are supported.")
-
-    return total_p_norm
-
-def get_parms_lp_norm(params, p):
-    '''
-    GIVES NAN LOSS! DO NOT USE
-    '''
-    lp_loss = torch.tensor(0.0, device=params[0].device)
-    for param in params:
-        if param.dim() == 4:  # Conv layer weights: (out_channels, in_channels, kernel_height, kernel_width)
-            # Compute norm across filter dimensions (last two dims)
-            lp_loss += compute_p_norm_conv_kernel(param, p)
-        elif param.dim() == 2:  # Fully connected layer weights
-            lp_loss += compute_p_norm_conv_kernel(param.unsqueeze(0).unsqueeze(0), p)
-        elif param.dim() == 1:  # Bias terms or other parameters
-            lp_loss += compute_p_norm_conv_kernel(param.unsqueeze(0).unsqueeze(0).unsqueeze(0), p)
-    return lp_loss
-
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
-    parser.add_argument('--sup_mark', default='20')
-    parser.add_argument('--unsup_mark', default='80')
     parser.add_argument('-b', '--batch_size', default=4, type=int) #default 16 but my ram can't take it
     parser.add_argument('-e', '--num_epochs', default=200, type=int)
     parser.add_argument('-s', '--step_size', default=50, type=int)
     parser.add_argument('-l', '--lr', default=0.5, type=float)
     parser.add_argument('-g', '--gamma', default=0.5, type=float)
-    parser.add_argument('-u', '--unsup_weight', default=0.5, type=float)
     parser.add_argument('--loss', default='dice')
     parser.add_argument('-w', '--warm_up_duration', default=20, type=int)
     parser.add_argument('--momentum', default=0.9, type=float)
@@ -117,6 +68,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
     parser.add_argument('--big2small', action='store_true', default=False, help='batch size big to small')
+    parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
 
     args = parser.parse_args()
 
@@ -126,18 +78,13 @@ if __name__ == '__main__':
     if args.show_args:
         print(args)
 
-    skip_unsup = False
-    if args.sup_mark == '100':
-        skip_unsup = True
-        args.unsup_weight = 0
-        args.unsup_mark = '0'
-        print('Skipping unsupervised training')
-
     fb_l0 = args.fbl0 * 1e-1
     fb_l1 = args.fbl1 * 1e-1
 
     # Set device to MPS or CPU
     device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+    if args.use_cpu:
+        device = torch.device("cpu")
     print(f"Using device: {device}")
 
     init_seeds(args.seed)
@@ -152,7 +99,7 @@ if __name__ == '__main__':
     # Trained model save
     path_trained_models = cfg['PATH_TRAINED_MODEL'] + '/' + str(dataset_name)
     os.makedirs(path_trained_models, exist_ok=True)
-    path_trained_models = path_trained_models + '/' + args.network + '-l=' + str(args.lr) + \
+    path_trained_models = path_trained_models + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
                     '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
@@ -163,7 +110,7 @@ if __name__ == '__main__':
     # Segmentation results save
     path_seg_results = cfg['PATH_SEG_RESULT'] + '/' + str(dataset_name)
     os.makedirs(path_seg_results, exist_ok=True)
-    path_seg_results = path_seg_results + '/' + args.network + '-l=' + str(args.lr) + \
+    path_seg_results = path_seg_results + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
                     '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
@@ -173,40 +120,24 @@ if __name__ == '__main__':
 
     # Visualization initialization
     if args.vis:
-        visdom_env = args.network + '-l=' + str(args.lr) + \
+        visdom_env = args.network + '-adaVal' + '-l=' + str(args.lr) + \
             '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
                 '-b=' + str(args.batch_size) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
                     '-bs=' + str(args.bs_step_size) + '-sd=' + str(args.seed) + \
                         '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
-        visdom = visdom_initialization_XNetv2(env=visdom_env, port=args.visdom_port)
+        visdom = visdom_initialization_WaveNetX(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
 
-    dataset_train_unsup = None
-    num_images_unsup = None
-    if not skip_unsup:
-        dataset_train_unsup = imagefolder_WaveNetX(
-            data_dir=cfg['PATH_DATASET'] + '/train_unsup_' + args.unsup_mark,
-            data_transform_1=data_transforms['train'],
-            data_normalize_1=data_normalize,
-            wavelet_type=args.wavelet_type,
-            alpha=args.alpha,
-            beta=args.beta,
-            sup=False,
-            num_images=None,
-        )
-        num_images_unsup = len(dataset_train_unsup)
-
     dataset_train_sup = imagefolder_WaveNetX(
-        data_dir=cfg['PATH_DATASET'] + '/train_sup_' + args.sup_mark,
+        data_dir=cfg['PATH_DATASET'] + '/train_sup_100',
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
         wavelet_type=args.wavelet_type,
         alpha=args.alpha,
         beta=args.beta,
         sup=True,
-        num_images=num_images_unsup,
         rand_crop=False,
     )
 
@@ -229,14 +160,10 @@ if __name__ == '__main__':
     dataloaders['train_sup_3'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*8, shuffle=True)
 
     dataloaders['val'] = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False)#, num_workers=8)
-    if not skip_unsup:
-        dataloaders['train_unsup'] = DataLoader(dataset_train_unsup, batch_size=args.batch_size, shuffle=True)#, num_workers=8)
 
     num_batches = {'train_sup_0': len(dataloaders['train_sup_0']), 'train_sup_1': len(dataloaders['train_sup_1']),
                     'train_sup_2': len(dataloaders['train_sup_2']), 'train_sup_3': len(dataloaders['train_sup_3']),
                     'val': len(dataloaders['val'])}
-    if not skip_unsup:
-        num_batches['train_unsup'] = len(dataloaders['train_unsup'])
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
@@ -250,7 +177,8 @@ if __name__ == '__main__':
 
     optimizer1 = optim.SGD(model1.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5 * 10 ** args.wd)
     exp_lr_scheduler1 = lr_scheduler.StepLR(optimizer1, step_size=args.step_size, gamma=args.gamma)
-    scheduler_warmup1 = GradualWarmupScheduler(optimizer1, multiplier=1.0, total_epoch=args.warm_up_duration, after_scheduler=exp_lr_scheduler1)
+    scheduler_warmup1 = GradualWarmupScheduler(optimizer1, multiplier=1.0, total_epoch=args.warm_up_duration, 
+                                               after_scheduler=exp_lr_scheduler1)
 
     since = time.time()
     count_iter = 0
@@ -270,7 +198,6 @@ if __name__ == '__main__':
         train_loss_sup_1 = 0.0
         train_loss_sup_2 = 0.0
         train_loss_sup_3 = 0.0
-        train_loss_unsup = 0.0
         train_loss = 0.0
 
         val_loss_sup_1 = 0.0
@@ -280,8 +207,6 @@ if __name__ == '__main__':
         # fb_l0 = fb_l0 * (0.5 ** (epoch // args.step_size))
         # fb_l1 = fb_l1 * (0.5 ** (epoch // args.step_size))
 
-        unsup_weight = args.unsup_weight * (epoch + 1) / args.num_epochs if not skip_unsup else 0
-
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
         if args.big2small:
             bs_idx = args.max_bs_steps - bs_idx
@@ -290,43 +215,10 @@ if __name__ == '__main__':
 
         dataset_train_sup = iter(dataloaders[bs_step_size])
 
-        if not skip_unsup:
-            dataset_train_unsup = iter(dataloaders['train_unsup'])
-
         for i in range(num_batches[bs_step_size]):
 
             loss_train = 0.0
             optimizer1.zero_grad()
-
-            if not skip_unsup:
-                unsup_index = next(dataset_train_unsup)
-                img_train_unsup = Variable(unsup_index['image'].to(device))
-                loss_train_unsup = 0  
-
-                if args.ver == 0:
-                    pred_train_unsup1, pred_train_unsup2, pred_train_unsup3 = model1(img_train_unsup)
-
-                    max_train1 = torch.max(pred_train_unsup1, dim=1)[1].long()
-                    max_train2 = torch.max(pred_train_unsup2, dim=1)[1].long()
-                    max_train3 = torch.max(pred_train_unsup3, dim=1)[1].long()
-                    loss_train_unsup = criterion(pred_train_unsup1, max_train2) + criterion(pred_train_unsup2, max_train1) + \
-                                    criterion(pred_train_unsup1, max_train3) + criterion(pred_train_unsup3, max_train1)
-                    loss_train_unsup = loss_train_unsup * unsup_weight
-                
-                else:
-                    pred_train_unsup = model1(img_train_unsup)
-                    max_train = torch.max(pred_train_unsup, dim=1)[1].long()
-                    loss_train_unsup = criterion(pred_train_unsup, max_train) * unsup_weight
-
-                loss_train_unsup += model1.dwt.get_fb_hi_0_mean_loss() * fb_l0
-
-                if args.ver >= 2:
-                    loss_train_unsup += model1.dwt.get_fb_lo_orthnorm_loss() * fb_l1
-
-                loss_train_unsup.backward(retain_graph=True)
-                loss_train += loss_train_unsup
-
-                train_loss_unsup += loss_train_unsup.item()
 
             sup_index = next(dataset_train_sup)
             img_train_sup = Variable(sup_index['image'].to(device))
@@ -375,12 +267,9 @@ if __name__ == '__main__':
         if (count_iter % args.display_iter == 0) or args.vis:
             print('=' * print_num)
             print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' ') + '|')
-            train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_epoch_loss = print_train_loss_XNetv2(
-                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss_unsup, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_step_size]
-            )
-            train_eval_list1, train_m_jc1 = print_train_eval_sup(
-                cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus
-            )
+            train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss = print_train_loss_WaveNetX(
+                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_step_size])
+            train_eval_list1, train_m_jc1, train_m_dc1 = print_train_eval_sup(cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus)
         
         # Validation loop
         with torch.no_grad():
@@ -411,12 +300,14 @@ if __name__ == '__main__':
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
 
-            val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3 = print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_batches, print_num, print_num_minus)
-            val_eval_list1, val_m_jc1, val_m_dice = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
-            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
+            val_epoch_loss_sup1 = print_val_loss_WaveNetX(val_loss_sup_1, num_batches, print_num, print_num_minus)
+            val_eval_list1, val_m_jc1, val_m_dc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
+            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, 
+                                                      path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
             if args.vis:                
                 draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
-                visualization_XNetv2(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss_unsup, train_m_jc1, val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3, val_m_jc1)
+                visualization_WaveNetX(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, 
+                                       train_m_jc1, train_m_dc1, val_epoch_loss_sup1, val_m_jc1, val_m_dc1)
                 visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
                 for f_idx in range(model1.dwt.nfil):
                     vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))

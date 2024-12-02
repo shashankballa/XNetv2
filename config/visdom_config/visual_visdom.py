@@ -18,6 +18,16 @@ def visualization_XNetv2(vis, epoch, train_loss, train_loss_sup1, train_loss_sup
     vis.line([[val_loss_sup1, val_loss_sup2, val_loss_sup3]], [epoch], win='val_loss', update='append')
     vis.line([val_m_jc1], [epoch], win='val_jc', update='append')
 
+def visdom_initialization_WaveNetX(env, port):
+    visdom = Visdom(env=env, port=port)
+    visdom.line([[0., 0., 0., 0., 0.]], [0.], win='loss', opts=dict(title='Train Loss', xlabel='Epoch', ylabel='Loss', legend=['Train Total', 'Train Sup', 'Train FBL0', 'Train FBL1', 'Val Sup'], width=550, height=350))
+    visdom.line([[0., 0., 0., 0.]], [0.], win='scores', opts=dict(title='Scores', xlabel='Epoch', ylabel='Jc', legend=['Train Jc', 'Train Dice', 'Val Jc', 'Val Dice'], width=550, height=350))
+    return visdom
+
+def visualization_WaveNetX(vis, epoch, train_loss, train_loss_sup1, train_loss_sup2, train_loss_sup3, train_m_jc1, train_m_dc1, val_loss_sup1, val_m_jc1, val_m_dc1):
+    vis.line([[train_loss, train_loss_sup1, train_loss_sup2, train_loss_sup3, val_loss_sup1]], [epoch], win='loss', update='append')
+    vis.line([[train_m_jc1, train_m_dc1, val_m_jc1, val_m_dc1]], [epoch], win='scores', update='append')
+
 def visual_image_sup(vis, mask_train, pred_train, mask_val, pred_val):
 
     vis.heatmap(mask_train, win='train_mask', opts=dict(title='Train Mask', colormap='Viridis'))

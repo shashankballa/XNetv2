@@ -34,6 +34,28 @@ def print_val_loss_XNetv2(val_loss_sup_1, val_loss_sup_2, val_loss_sup_3, num_ba
     print('-' * print_num)
     return val_epoch_loss_sup1, val_epoch_loss_sup2, val_epoch_loss_sup3
 
+def print_train_loss_WaveNetX(train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, batch_size = None):
+    if batch_size is None:
+        batch_size = num_batches['train_sup']
+    train_epoch_loss_sup1 = train_loss_sup_1 / batch_size
+    train_epoch_loss_sup2 = train_loss_sup_2 / batch_size
+    train_epoch_loss_sup3 = train_loss_sup_3 / batch_size
+    train_epoch_loss = train_loss / batch_size
+    print('-' * print_num)
+    print('| Train Sup Loss 1: {:.4f}'.format(train_epoch_loss_sup1).ljust(print_num_minus, ' '), '|')
+    print('| Train Sup Loss 2: {:.4f}'.format(train_epoch_loss_sup2).ljust(print_num_minus, ' '), '|')
+    print('| Train Sup Loss 3: {:.4f}'.format(train_epoch_loss_sup3).ljust(print_num_minus, ' '), '|')
+    print('| Train Total Loss: {:.4f}'.format(train_epoch_loss).ljust(print_num_minus, ' '), '|')
+    print('-' * print_num)
+    return train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss
+
+def print_val_loss_WaveNetX(val_loss_sup_1, num_batches, print_num, print_num_minus):
+    val_epoch_loss_sup1 = val_loss_sup_1 / num_batches['val']
+    print('-' * print_num)
+    print('| Val Sup Loss 1: {:.4f}'.format(val_epoch_loss_sup1).ljust(print_num_minus, ' '), '|')
+    print('-' * print_num)
+    return val_epoch_loss_sup1
+
 
 def print_train_eval_sup(num_classes, score_list_train, mask_list_train, print_num):
 
@@ -43,6 +65,7 @@ def print_train_eval_sup(num_classes, score_list_train, mask_list_train, print_n
         print('| Train  Jc: {:.4f}'.format(eval_list[1]).ljust(print_num, ' '), '|')
         print('| Train  Dc: {:.4f}'.format(eval_list[2]).ljust(print_num, ' '), '|')
         train_m_jc = eval_list[1]
+        train_m_dc = eval_list[2]
 
     else:
         eval_list = evaluate_multi(score_list_train, mask_list_train)
@@ -52,9 +75,10 @@ def print_train_eval_sup(num_classes, score_list_train, mask_list_train, print_n
         print('| Train  Dc: {}'.format(eval_list[2]).ljust(print_num, ' '), '|')
         print('| Train mJc: {:.4f}'.format(eval_list[1]).ljust(print_num, ' '), '|')
         print('| Train mDc: {:.4f}'.format(eval_list[3]).ljust(print_num, ' '), '|')
-        train_m_jc = eval_list[1]
+        train_m_jc = eval_list[0]
+        train_m_dc = eval_list[1]
 
-    return eval_list, train_m_jc
+    return eval_list, train_m_jc, train_m_dc
 
 def print_val_eval_sup(num_classes, score_list_val, mask_list_val, print_num):
     if num_classes == 2:
@@ -63,6 +87,7 @@ def print_val_eval_sup(num_classes, score_list_val, mask_list_val, print_num):
         print('| Val  Jc: {:.4f}'.format(eval_list[1]).ljust(print_num, ' '), '|')
         print('| Val  Dc: {:.4f}'.format(eval_list[2]).ljust(print_num, ' '), '|')
         val_m_jc = eval_list[1]
+        val_m_dice = eval_list[2]
     else:
         eval_list = evaluate_multi(score_list_val, mask_list_val)
         np.set_printoptions(precision=4, suppress=True)
@@ -70,43 +95,43 @@ def print_val_eval_sup(num_classes, score_list_val, mask_list_val, print_num):
         print('| Val  Dc: {}  '.format(eval_list[2]).ljust(print_num, ' '), '|')
         print('| Val mJc: {:.4f}'.format(eval_list[1]).ljust(print_num, ' '), '|')
         print('| Val mDc: {:.4f}'.format(eval_list[3]).ljust(print_num, ' '), '|')
-        val_m_jc = eval_list[1]
-    return eval_list, val_m_jc
-
+        val_m_jc = eval_list[0]
+        val_m_dice = eval_list[2]
+    return eval_list, val_m_jc, val_m_dice
 
 def save_val_best_sup_2d(num_classes, best_list, model, score_list_val, name_list_val, eval_list, path_trained_model, path_seg_results, palette, model_name):
+    def save_results(pred_results, name_list, palette, save_path):
+        assert len(name_list) == pred_results.shape[0], "Mismatch in results and name list lengths."
+        for i in range(len(name_list)):
+            color_results = Image.fromarray(pred_results[i].astype(np.uint8), mode='P')
+            color_results.putpalette(palette)
+            color_results.save(os.path.join(save_path, name_list[i]))
 
-    if num_classes == 2:
-        if best_list[1] < eval_list[1]:
-            best_list = eval_list
+    if best_list[1] < eval_list[1]:
+        best_list[1] = eval_list[1]  # Update in place
 
-            torch.save(model.state_dict(), os.path.join(path_trained_model, 'best_{}_Jc_{:.4f}.pth'.format(model_name, best_list[1])))
+        torch.save(model.state_dict(), os.path.join(path_trained_model, f'best_{model_name}_Jc_{best_list[1]:.4f}.pth'))
 
+        if num_classes == 2:
             score_list_val = torch.softmax(score_list_val, dim=1)
             pred_results = score_list_val[:, 1, :, :].cpu().numpy()
-            pred_results[pred_results > eval_list[0]] = 1
-            pred_results[pred_results <= eval_list[0]] = 0
+            pred_results = (pred_results > eval_list[0]).astype(np.uint8)  # Thresholding for binary
+        else:
+            pred_results = torch.max(score_list_val, 1)[1].cpu().numpy()  # Multiclass
 
-            assert len(name_list_val) == pred_results.shape[0]
-            for i in range(len(name_list_val)):
-                color_results = Image.fromarray(pred_results[i].astype(np.uint8), mode='P')
-                color_results.putpalette(palette)
-                color_results.save(os.path.join(path_seg_results, name_list_val[i]))
+        save_results(pred_results, name_list_val, palette, path_seg_results)
+    elif best_list[2] < eval_list[2]:
+        best_list[2] = eval_list[2]
+        torch.save(model.state_dict(), os.path.join(path_trained_model, f'best_{model_name}_Dc_{best_list[2]:.4f}.pth'))
+        
+        if num_classes == 2:
+            score_list_val = torch.softmax(score_list_val, dim=1)
+            pred_results = score_list_val[:, 1, :, :].cpu().numpy()
+            pred_results = (pred_results > eval_list[0]).astype(np.uint8)
+        else:
+            pred_results = torch.max(score_list_val, 1)[1].cpu().numpy()
 
-    else:
-        if best_list[1] < eval_list[1]:
-            best_list = eval_list
-
-            torch.save(model.state_dict(), os.path.join(path_trained_model, 'best_{}_Jc_{:.4f}.pth'.format(model_name, best_list[1])))
-
-            pred_results = torch.max(score_list_val, 1)[1]
-            pred_results = pred_results.cpu().numpy()
-
-            assert len(name_list_val) == pred_results.shape[0]
-            for i in range(len(name_list_val)):
-                color_results = Image.fromarray(pred_results[i].astype(np.uint8), mode='P')
-                color_results.putpalette(palette)
-                color_results.save(os.path.join(path_seg_results, name_list_val[i]))
+        save_results(pred_results, name_list_val, palette, path_seg_results)
 
     return best_list
 

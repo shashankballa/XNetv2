@@ -77,7 +77,7 @@ class DWT_1lvl(nn.Module):
         fb_hh = fb_hh.view(fb_hh.shape[0], 1, fb_hh.shape[1], fb_hh.shape[2]).repeat(inp_channels, 1, 1, 1)
         return fb_ll, fb_lh, fb_hl, fb_hh
     
-    def get_fb_hi_loss(self):
+    def get_fb_hi_0_mean_loss(self):
         # Ensure that fb_hi is zero-mean
         fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
         fb_hi = fb_lo.flip(-1)
@@ -242,20 +242,6 @@ class DWT_mtap(nn.Module):
             _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=0)
             _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=0)
 
-            # for i in range(_nfil):
-            #     plt.figure()
-            #     plt.subplot(2, 2, 1)
-            #     plt.imshow(_fb_ll[i, 0].detach().cpu().numpy())
-            #     plt.axis('off')
-            #     plt.subplot(2, 2, 2)
-            #     plt.imshow(_fb_lh[i, 0].detach().cpu().numpy())
-            #     plt.axis('off')
-            #     plt.subplot(2, 2, 3)
-            #     plt.imshow(_fb_hl[i, 0].detach().cpu().numpy())
-            #     plt.axis('off')
-            #     plt.subplot(2, 2, 4)
-            #     plt.imshow(_fb_hh[i, 0].detach().cpu().numpy())
-
             fb_ll.append(_fb_ll)
             fb_lh.append(_fb_lh)
             fb_hl.append(_fb_hl)
@@ -267,7 +253,7 @@ class DWT_mtap(nn.Module):
         fb_hh = torch.cat(fb_hh, dim=0)
         return fb_ll, fb_lh, fb_hl, fb_hh
     
-    def get_fb_hi_loss(self):
+    def get_fb_hi_0_mean_loss(self):
         # Ensure that fb_hi is zero-mean
         fb_hi_loss = 0.0
         for _fb_lo in self.get_fb_lo_list():
@@ -276,6 +262,28 @@ class DWT_mtap(nn.Module):
             fb_hi[:, ::2] *= -1
             fb_hi_loss += fb_hi.sum(dim=-1).abs().sum()
         return fb_hi_loss
+    
+    def get_fb_lo_orthnorm_loss(self):
+        """
+        Compute orthonormality loss for all fb_lo filter banks in DWT_mtap.
+        Ensures that the rows of each filter bank are orthogonal and unit norm.
+
+        Returns:
+            torch.Tensor: Orthonormality loss.
+        """
+        orthonormal_loss = 0.0
+        for _fb_lo in self.get_fb_lo_list():
+            # Normalize the filter bank rows
+            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
+
+            # Compute Gram matrix: G = W * W^T
+            gram_matrix = _fb_lo @ _fb_lo.T
+
+            # Orthonormality loss: ||G - I||_F^2
+            identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
+            orthonormal_loss += torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
+
+        return orthonormal_loss
 
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
@@ -1268,7 +1276,7 @@ if __name__ == '__main__':
 
     pred = model(img_crop)
 
-    fb_hi_loss = model.dwt.get_fb_hi_loss().detach().cpu().numpy()
+    fb_hi_loss = model.dwt.get_fb_hi_0_mean_loss().detach().cpu().numpy()
 
     print('FB_HI Loss:', fb_hi_loss)
 

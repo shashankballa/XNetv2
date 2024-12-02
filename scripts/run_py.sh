@@ -1,9 +1,9 @@
 ARG1=$1
 shift
 
-source pyenv/bin/activate
+source .pyenv/bin/activate
 if [ $? -eq 0 ]; then
-    pyenv/bin/python "$ARG1" "$@"
+    .pyenv/bin/python "$ARG1" "$@"
     deactivate
 else
     echo "Failed to activate virtual environment"
