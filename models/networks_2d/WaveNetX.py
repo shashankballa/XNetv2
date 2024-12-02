@@ -206,6 +206,11 @@ class DWT_mtap(nn.Module):
         self.fb_los7 = nn.Parameter(torch.rand((self.nfils[7], self.flens[7])))
         self.pad_mode = pad_mode
         self.inp_channels = inp_channels
+
+        # add scales for losses based on filter lengths: larger flen -> higher loss scale
+        self.loss_scales = torch.tensor([flen / self.flen_max for flen in self.flens])
+        self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
+
     
     def get_fb_lo_list(self):
         return [self.fb_los0, self.fb_los1, self.fb_los2, self.fb_los3, self.fb_los4, self.fb_los5, self.fb_los6, self.fb_los7]
@@ -262,11 +267,13 @@ class DWT_mtap(nn.Module):
     def get_fb_hi_0_mean_loss(self):
         # Ensure that fb_hi is zero-mean
         fb_hi_loss = 0.0
+        f_idx = 0
         for _fb_lo in self.get_fb_lo_list():
             fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
             fb_hi = fb_lo.flip(-1)
             fb_hi[:, ::2] *= -1
-            fb_hi_loss += fb_hi.sum(dim=-1).abs().sum()
+            fb_hi_loss += fb_hi.sum(dim=-1).abs().sum() * self.loss_scales[f_idx]
+            f_idx += 1
         return fb_hi_loss
     
     def get_fb_lo_orthnorm_loss(self):
@@ -278,6 +285,7 @@ class DWT_mtap(nn.Module):
             torch.Tensor: Orthonormality loss.
         """
         orthonormal_loss = 0.0
+        f_idx = 0
         for _fb_lo in self.get_fb_lo_list():
             # Normalize the filter bank rows
             fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
@@ -287,8 +295,9 @@ class DWT_mtap(nn.Module):
 
             # Orthonormality loss: ||G - I||_F^2
             identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
-            orthonormal_loss += torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
-
+            _loss = torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
+            orthonormal_loss += _loss * self.loss_scales[f_idx]
+            f_idx += 1
         return orthonormal_loss
 
     def forward(self, x):

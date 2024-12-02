@@ -204,18 +204,18 @@ if __name__ == '__main__':
         fb_l0 = args.fbl0 * 1e-1
         fb_l1 = args.fbl1 * 1e-1
 
-        fb_l0 *= (1.0+args.gamma) ** (epoch // args.step_size)
-        fb_l1 *= (1.0+args.gamma) ** (epoch // args.step_size)
+        fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
+        fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
         if args.big2small:
             bs_idx = args.max_bs_steps - bs_idx
 
-        bs_step_size = 'train_sup_' + str(bs_idx)
+        bs_str = 'train_sup_' + str(bs_idx)
 
-        dataset_train_sup = iter(dataloaders[bs_step_size])
+        dataset_train_sup = iter(dataloaders[bs_str])
 
-        for i in range(num_batches[bs_step_size]):
+        for i in range(num_batches[bs_str]):
 
             loss_train = 0.0
             optimizer1.zero_grad()
@@ -257,7 +257,7 @@ if __name__ == '__main__':
                 if i == 0:
                     score_list_train1 = pred_train_sup1
                     mask_list_train = mask_train_sup
-                elif 0 < i <= num_batches[bs_step_size] / 64:
+                elif 0 < i <= num_batches[bs_str] / 64:
                     score_list_train1 = torch.cat((score_list_train1, pred_train_sup1), dim=0)
                     mask_list_train = torch.cat((mask_list_train, mask_train_sup), dim=0)
 
@@ -268,7 +268,7 @@ if __name__ == '__main__':
             print('=' * print_num)
             print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' ') + '|')
             train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss = print_train_loss_WaveNetX(
-                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_step_size])
+                train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_str])
             train_eval_list1, train_m_jc1, train_m_dc1 = print_train_eval_sup(cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus)
         
         # Validation loop
