@@ -69,6 +69,10 @@ if __name__ == '__main__':
     parser.add_argument('--beta', default=[0.5, 0.8])
     parser.add_argument('-n', '--network', default='WaveNetXv2', type=str)
     parser.add_argument('--threshold', default=0.5, type=float)
+    #parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
+    #parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
+    #parser.add_argument('--flen', default=4, type=int, help='filter length in the DWT layer')
+    #parser.add_argument('--flen_step', default=4, type=int, help='filter length step size in the DWT layer')
     args = parser.parse_args()
 
     # Parse model parameters from the filename
@@ -84,15 +88,18 @@ if __name__ == '__main__':
     step_size = model_params.get('s', 50)
     gamma = model_params.get('g', 0.5)
     nfil = model_params.get('nf', 4)
+    nfil_step = model_params.get('nfs', 4)
     flen = model_params.get('fl', 4)
+    flen_step = model_params.get('fls', 4)
     fbl0 = model_params.get('fbl0', 0.2)
     fbl1 = model_params.get('fbl1', 0.005)
+    seed =  model_params.get('sd', args.seed)
 
     # Initialize device
     device = torch.device("mps") if torch.backends.mps.is_available() else (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
     print(f"Using device: {device}")
 
-    init_seeds(args.seed)
+    init_seeds(seed)
 
     # Config
     cfg = dataset_cfg(args.dataset_name)
@@ -114,16 +121,9 @@ if __name__ == '__main__':
 
     # Model
     network_name = args.network
-    model = get_network(
-        network_name,
-        cfg['IN_CHANNELS'],
-        cfg['NUM_CLASSES'],
-        nfil=nfil,
-        flen=flen
-    ).to(device)
-    model1 = get_network(network_name, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
+    model = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
         nfil=nfil, flen=flen, # WaveNetXv0 and WaveNetXv1
-        flen_start=flen, nfil_start=nfil# WaveNetXv2
+        nfil_start=nfil, flen_start=flen, flen_step=flen_step, nfil_step=nfil_step # WaveNetXv2
         ).to(device)
 
     # Load checkpoint
@@ -175,8 +175,8 @@ if __name__ == '__main__':
             save_test_2d(cfg['NUM_CLASSES'], outputs_test1, name_test, args.threshold, results_path, cfg['PALETTE'])
             # Visualization of filter banks
             if args.vis:
-                for f_idx in range(model1.dwt.nfil):
-                    vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
+                for f_idx in range(model.dwt.nfil):
+                    vis_filter_bank_WaveNetX(visdom, fb_2d_list=model.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
 
         # Calculate testing losses and metrics
         print_num = 77 + (cfg['NUM_CLASSES'] - 3) * 14
@@ -192,3 +192,4 @@ if __name__ == '__main__':
         test_eval_list, test_m_jc, test_m_dice = print_test_eval(cfg['NUM_CLASSES'], score_list_test1, mask_list_test, print_num)
 
     print("Testing complete.")
+
