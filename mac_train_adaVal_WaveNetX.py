@@ -248,7 +248,7 @@ if __name__ == '__main__':
             loss_train_sup += loss_train_sup2
 
             if args.ver >= 2:
-                loss_train_sup3 = model1.dwt.get_fb_lo_orthnorm_loss() * fb_l1
+                loss_train_sup3 = model1.dwt.get_fb_lo_orthnorm_loss_v2() * fb_l1
                 train_loss_sup_3 += loss_train_sup3.item()
                 loss_train_sup += loss_train_sup3
 
