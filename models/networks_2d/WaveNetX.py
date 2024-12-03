@@ -86,50 +86,11 @@ class DWT_1lvl(nn.Module):
 
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
-        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
-        fb_hi = fb_lo.flip(-1)
-        fb_hi[:, ::2] *= -1
-
-        # Reshape filters for conv1d
-        fb_lo = fb_lo.view(self.nfil, 1, self.flen).to(x.device)
-        fb_hi = fb_hi.view(self.nfil, 1, self.flen).to(x.device)
-
-        batch_size, channels, height, width = x_pad.shape
-
-        # Convolve along height (rows)
-        # Reshape x_pad to [batch_size * width, channels, height]
-        x_v = x_pad.permute(0, 3, 1, 2).contiguous().view(-1, channels, height)
-
-        # Convolve with fb_lo and fb_hi
-        x_v_lo = F.conv1d(x_v, fb_lo, padding=self.flen // 2, groups=channels)
-        x_v_hi = F.conv1d(x_v, fb_hi, padding=self.flen // 2, groups=channels)
-
-        # Reshape back to [batch_size, width, channels * nfil, new_height]
-        new_height = x_v_lo.size(-1)
-        x_v_lo = x_v_lo.view(batch_size, width, channels * self.nfil, new_height)
-        x_v_hi = x_v_hi.view(batch_size, width, channels * self.nfil, new_height)
-
-        # Permute to [batch_size, channels * nfil, new_height, width]
-        x_v_lo = x_v_lo.permute(0, 2, 3, 1)
-        x_v_hi = x_v_hi.permute(0, 2, 3, 1)
-
-        # Convolve along width (columns)
-        # Reshape to [batch_size * new_height, channels * nfil, width]
-        x_v_lo = x_v_lo.permute(0, 2, 1, 3).contiguous().view(-1, channels * self.nfil, width)
-        x_v_hi = x_v_hi.permute(0, 2, 1, 3).contiguous().view(-1, channels * self.nfil, width)
-
-        x_ll = F.conv1d(x_v_lo, fb_lo, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
-        x_lh = F.conv1d(x_v_lo, fb_hi, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
-        x_hl = F.conv1d(x_v_hi, fb_lo, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
-        x_hh = F.conv1d(x_v_hi, fb_hi, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
-
-        # Reshape outputs
-        new_width = x_ll.size(-1)
-        x_ll = x_ll.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
-        x_lh = x_lh.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
-        x_hl = x_hl.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
-        x_hh = x_hh.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
-
+        fb_ll, fb_lh, fb_hl, fb_hh = self.get_fb_2d_list(inp_channels=x.shape[1])
+        x_ll = F.conv2d(x_pad, fb_ll.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_lh = F.conv2d(x_pad, fb_lh.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_hl = F.conv2d(x_pad, fb_hl.to(x_pad.device), stride=2, groups=x.shape[1])
+        x_hh = F.conv2d(x_pad, fb_hh.to(x_pad.device), stride=2, groups=x.shape[1])
         return x_ll, (x_lh, x_hl, x_hh)
 
 class IDWT_1lvl(nn.Module):
