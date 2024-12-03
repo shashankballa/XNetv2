@@ -86,11 +86,50 @@ class DWT_1lvl(nn.Module):
 
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
-        fb_ll, fb_lh, fb_hl, fb_hh = self.get_fb_2d_list(inp_channels=x.shape[1])
-        x_ll = F.conv2d(x_pad, fb_ll.to(x_pad.device), stride=2, groups=x.shape[1])
-        x_lh = F.conv2d(x_pad, fb_lh.to(x_pad.device), stride=2, groups=x.shape[1])
-        x_hl = F.conv2d(x_pad, fb_hl.to(x_pad.device), stride=2, groups=x.shape[1])
-        x_hh = F.conv2d(x_pad, fb_hh.to(x_pad.device), stride=2, groups=x.shape[1])
+        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
+        fb_hi = fb_lo.flip(-1)
+        fb_hi[:, ::2] *= -1
+
+        # Reshape filters for conv1d
+        fb_lo = fb_lo.view(self.nfil, 1, self.flen).to(x.device)
+        fb_hi = fb_hi.view(self.nfil, 1, self.flen).to(x.device)
+
+        batch_size, channels, height, width = x_pad.shape
+
+        # Convolve along height (rows)
+        # Reshape x_pad to [batch_size * width, channels, height]
+        x_v = x_pad.permute(0, 3, 1, 2).contiguous().view(-1, channels, height)
+
+        # Convolve with fb_lo and fb_hi
+        x_v_lo = F.conv1d(x_v, fb_lo, padding=self.flen // 2, groups=channels)
+        x_v_hi = F.conv1d(x_v, fb_hi, padding=self.flen // 2, groups=channels)
+
+        # Reshape back to [batch_size, width, channels * nfil, new_height]
+        new_height = x_v_lo.size(-1)
+        x_v_lo = x_v_lo.view(batch_size, width, channels * self.nfil, new_height)
+        x_v_hi = x_v_hi.view(batch_size, width, channels * self.nfil, new_height)
+
+        # Permute to [batch_size, channels * nfil, new_height, width]
+        x_v_lo = x_v_lo.permute(0, 2, 3, 1)
+        x_v_hi = x_v_hi.permute(0, 2, 3, 1)
+
+        # Convolve along width (columns)
+        # Reshape to [batch_size * new_height, channels * nfil, width]
+        x_v_lo = x_v_lo.permute(0, 2, 1, 3).contiguous().view(-1, channels * self.nfil, width)
+        x_v_hi = x_v_hi.permute(0, 2, 1, 3).contiguous().view(-1, channels * self.nfil, width)
+
+        x_ll = F.conv1d(x_v_lo, fb_lo, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
+        x_lh = F.conv1d(x_v_lo, fb_hi, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
+        x_hl = F.conv1d(x_v_hi, fb_lo, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
+        x_hh = F.conv1d(x_v_hi, fb_hi, stride=2, padding=self.flen // 2, groups=channels * self.nfil)
+
+        # Reshape outputs
+        new_width = x_ll.size(-1)
+        x_ll = x_ll.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
+        x_lh = x_lh.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
+        x_hl = x_hl.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
+        x_hh = x_hh.view(batch_size, new_height, channels * self.nfil, new_width).permute(0, 2, 1, 3)
+
         return x_ll, (x_lh, x_hl, x_hh)
 
 class IDWT_1lvl(nn.Module):
@@ -168,11 +207,11 @@ class IDWT_1lvl(nn.Module):
 
 NFLENS = 8
 
-# bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 8 -l 2 -e 1000 -s 60  -w 30 --bs_step 90 --max_bs_steps 2 --fbl0 0.1 --fbl1 0.01 --seed 136 --nfil_step 0 --flen_step 4 --nfil 9 --nfil_step -1 --flen 2 -g 0.8
+# bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 8 -l 2 -e 1000 -s 60  -w 30 --bs_step 90 --max_bs_steps 2 --fbl0 0.1 --fbl1 0.004 --seed 136 --nfil_step 0 --flen_step 4 --nfil 1 --nfil_step 1 --flen 2 -g 0.8
 
 class DWT_mtap(nn.Module):
 
-    def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None,
+    def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None, symm_nfils = True, # Make false for backward compatibility
                  pad_mode="replicate"):
         '''
         DWT_mtap: 1-level DWT with multi-tap Quadrature Mirror Filter Banks
@@ -192,11 +231,18 @@ class DWT_mtap(nn.Module):
 
         self.nflens = NFLENS # nflens 
         self.flen_step = flen_step
+
         self.flens = torch.tensor([flen_start + self.flen_step*i for i in range(self.nflens)])
+
         self.flen_max = torch.max(self.flens)
 
         self.nfil_step = nfil_step
-        self.nfils = torch.tensor([nfil_start + self.nfil_step*i for i in range(self.nflens)])
+
+        if symm_nfils:
+            self.nfils = torch.tensor([nfil_start + self.nfil_step * (self.nflens // 2 - abs(i - self.nflens // 2)) for i in range(self.nflens)])
+        else:
+            self.nfils = torch.tensor([nfil_start + self.nfil_step*i for i in range(self.nflens)])
+
         self.nfil = torch.sum(self.nfils)
         self.fb_los0 = nn.Parameter(torch.rand((self.nfils[0], self.flens[0])))
         self.fb_los1 = nn.Parameter(torch.rand((self.nfils[1], self.flens[1])))
@@ -229,7 +275,7 @@ class DWT_mtap(nn.Module):
             padl += 1
         return [padl, padr, padt, padb]
     
-    def get_fb_2d_list(self, inp_channels = None, for_vis=False, fix_zero = False):
+    def get_fb_2d_list(self, inp_channels = None, for_vis=False):
         if inp_channels is None:
             inp_channels = self.inp_channels
         fb_ll, fb_lh, fb_hl, fb_hh = [], [], [], []
@@ -244,6 +290,7 @@ class DWT_mtap(nn.Module):
             _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
             _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
 
+            _padval = 0
             if not for_vis:
                 _fb_ll = _fb_ll.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_lh = _fb_lh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
@@ -258,12 +305,13 @@ class DWT_mtap(nn.Module):
                 _fb_lh = (_fb_lh/_maxx + 1) / 2
                 _fb_hl = (_fb_hl/_maxx + 1) / 2
                 _fb_hh = (_fb_hh/_maxx + 1) / 2
+                _padval = 0.5
 
             pads = [(self.flen_max - _fb_lo.shape[1]) // 2] * 4
-            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=0)
-            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=0)
-            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=0)
-            _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=0)
+            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=_padval)
+            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=_padval)
+            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=_padval)
+            _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=_padval)
 
             fb_ll.append(_fb_ll)
             fb_lh.append(_fb_lh)
@@ -311,7 +359,7 @@ class DWT_mtap(nn.Module):
             orthonormal_loss += _loss * self.loss_scales[f_idx]
             f_idx += 1
         return orthonormal_loss
-
+    
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
         fb_ll, fb_lh, fb_hl, fb_hh = self.get_fb_2d_list(inp_channels=x.shape[1])
@@ -940,11 +988,14 @@ class WaveNetXv2(nn.Module):
     
 latest_ver = 2
 
-def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS):
+def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS, symm_nfils=True):
     if version > latest_ver:
         raise ValueError(('WaveNetXv%d model is not available yet') % version)
     if version >= 2:
-        nfils = [nfil_start + i*nfil_step for i in range(nflens)]
+        if symm_nfils:
+            nfils = [nfil_start + nfil_step * (nflens // 2 - abs(i - nflens // 2)) for i in range(nflens)]
+        else:
+            nfils = [nfil_start + i*nfil_step for i in range(nflens)]
         flens = [flen_start + i*flen_step for i in range(nflens)]
         lst_str = '[%d' + ', %d'*(nflens-1) + ']'
         print(('Building WaveNetXv'+str(version)+' model with '+lst_str+'-number '+lst_str+'-tap filters') % (*nfils, *flens))
@@ -1178,145 +1229,145 @@ if __name__ == '__main__':
     msk_crop = msk_torch[:, :, rnd_h_off:rnd_h_off + crop_size, rnd_w_off:rnd_w_off + crop_size]
     msk_crop = transforms.Resize((_resize, _resize))(msk_crop)
 
-    # # test with dwt2 from pywt with db4
-    # wletstr = 'db4'
-    # wavelet = pywt.Wavelet(wletstr)
+    # test with dwt2 from pywt with db4
+    wletstr = 'db4'
+    wavelet = pywt.Wavelet(wletstr)
 
-    # # plot the DWT filter from wavelet
-    # dec_lo = wavelet.dec_lo
-    # dec_hi = wavelet.dec_hi
-    # print((' DWT LP '+wletstr+': ' + (df+' ') * len(dec_lo)) % tuple(dec_lo))
-    # print(('  \---------> Norm : ' + df) % np.square(dec_lo).sum())
-    # print(('   \--------> Sum  : ' + df) % np.sum(dec_lo))
-    # print((' DWT HP '+wletstr+': ' + (df+' ') * len(dec_hi)) % tuple(dec_hi))
-    # print(('  \---------> Norm : ' + df) % np.square(dec_hi).sum())
-    # print(('   \--------> Sum  : ' + df) % np.sum(dec_hi))
-    # if plot_img:
-    #     plot_fil(dec_lo, dec_hi)
-    #     plot_fil_2d(fil_lo=dec_lo, fil_hi=dec_hi)
+    # plot the DWT filter from wavelet
+    dec_lo = wavelet.dec_lo
+    dec_hi = wavelet.dec_hi
+    print((' DWT LP '+wletstr+': ' + (df+' ') * len(dec_lo)) % tuple(dec_lo))
+    print(('  \---------> Norm : ' + df) % np.square(dec_lo).sum())
+    print(('   \--------> Sum  : ' + df) % np.sum(dec_lo))
+    print((' DWT HP '+wletstr+': ' + (df+' ') * len(dec_hi)) % tuple(dec_hi))
+    print(('  \---------> Norm : ' + df) % np.square(dec_hi).sum())
+    print(('   \--------> Sum  : ' + df) % np.sum(dec_hi))
+    if plot_img:
+        plot_fil(dec_lo, dec_hi)
+        plot_fil_2d(fil_lo=dec_lo, fil_hi=dec_hi)
 
-    # rec_lo = wavelet.rec_lo
-    # rec_hi = wavelet.rec_hi
-    # print(('IDWT LP '+wletstr+': ' +(df+' ') * len(rec_lo)) % tuple(rec_lo))
-    # print(('  \---------> Norm : ' +df) % np.square(rec_lo).sum())
-    # print(('   \--------> Sum  : ' +df) % np.sum(rec_lo))
-    # print(('IDWT HP '+wletstr+': ' +(df+' ') * len(rec_hi)) % tuple(rec_hi))
-    # print(('  \---------> Norm : ' +df) % np.square(rec_hi).sum())
-    # print(('   \--------> Sum  : ' +df) % np.sum(rec_hi))
+    rec_lo = wavelet.rec_lo
+    rec_hi = wavelet.rec_hi
+    print(('IDWT LP '+wletstr+': ' +(df+' ') * len(rec_lo)) % tuple(rec_lo))
+    print(('  \---------> Norm : ' +df) % np.square(rec_lo).sum())
+    print(('   \--------> Sum  : ' +df) % np.sum(rec_lo))
+    print(('IDWT HP '+wletstr+': ' +(df+' ') * len(rec_hi)) % tuple(rec_hi))
+    print(('  \---------> Norm : ' +df) % np.square(rec_hi).sum())
+    print(('   \--------> Sum  : ' +df) % np.sum(rec_hi))
     
-    # if plot_img:
-    #     plot_fil(rec_lo, rec_hi)
-    #     plot_fil_2d(fil_lo=rec_lo, fil_hi=rec_hi)
+    if plot_img:
+        plot_fil(rec_lo, rec_hi)
+        plot_fil_2d(fil_lo=rec_lo, fil_hi=rec_hi)
 
-    # img_dwt2 = pywt.dwt2(img_crop.squeeze(0).numpy(), wavelet)
-    # msk_dwt2 = pywt.dwt2(msk_crop.squeeze(0).numpy(), wavelet)
-
-    # if plot_img:
-    #     plot_dwt(img_dwt2)
-    #     plot_dwt(msk_dwt2)
-
-    # print('LL '+wletstr+' img:', img_dwt2[0].shape)
-    # print('LH '+wletstr+' img:', img_dwt2[1][0].shape)
-    # print('HL '+wletstr+' img:', img_dwt2[1][1].shape)
-    # print('HH '+wletstr+' img:', img_dwt2[1][2].shape)
-    # print('LL '+wletstr+' msk:', msk_dwt2[0].shape)
-    # print('LH '+wletstr+' msk:', msk_dwt2[1][0].shape)
-    # print('HL '+wletstr+' msk:', msk_dwt2[1][1].shape)
-    # print('HH '+wletstr+' msk:', msk_dwt2[1][2].shape)
-
-    # dwt_layer = DWT_1lvl(fb_lo=wavelet.dec_lo)
-    # img_dwt = dwt_layer(img_crop)
-    # msk_dwt = dwt_layer(msk_crop)
-
-    # print('LL img:', img_dwt[0].shape)
-    # print('LH img:', img_dwt[1][0].shape)
-    # print('HL img:', img_dwt[1][1].shape)
-    # print('HH img:', img_dwt[1][2].shape)
-
-    # if plot_img:
-    #     plot_dwt(img_dwt)
-
-    # # Show mse between pywt and random layer
-    # mse_ll = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[0]).unsqueeze(0), img_dwt[0])
-    # mse_lh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][0]).unsqueeze(0), img_dwt[1][0])
-    # mse_hl = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][1]).unsqueeze(0), img_dwt[1][1])
-    # mse_hh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][2]).unsqueeze(0), img_dwt[1][2])
-
-    # print(('MSE LL  : '+df+'; MSE LH: '+df+'; MSE HL: '+df+'; MSE HH: '+df) % (mse_ll, mse_lh, mse_hl, mse_hh))
-
-    # ## IDWT
-
-    # # test idwt2 from pywt
-    # img_idwt2 = pywt.idwt2(img_dwt2, wavelet)
-    # msk_idwt2 = pywt.idwt2(msk_dwt2, wavelet)
-
-    # if plot_img:
-    #     plot_idwt(img_idwt2, img_crop)
-    #     plot_idwt(msk_idwt2, msk_crop)
-
-    # idwt_layer = IDWT_1lvl(out_channels=img_crop.shape[1])
-    # img_idwt = idwt_layer(img_dwt, dwt_fb_lo=dwt_layer.fb_lo)
-        
-    # # show mse between pywt and manual layer
-    # mse_idwt = torch.nn.functional.mse_loss(torch.tensor(img_idwt2).unsqueeze(0), img_idwt)
-    # print(('MSE IDWT: '+df) % mse_idwt)
-
-    # if plot_img:
-    #     plot_idwt(img_idwt, img_crop)
-
-    # nfil = 16
-    # flen = 8    
-    # rand_dwt = DWT_1lvl(nfil=nfil, flen=flen)
-
-    # img_rand_dwt = rand_dwt(img_crop)
-    # msk_rand_dwt = rand_dwt(msk_crop)
-
-    # print('LL rand:', img_rand_dwt[0].shape)
-    # print('LH rand:', img_rand_dwt[1][0].shape)
-    # print('HL rand:', img_rand_dwt[1][1].shape)
-    # print('HH rand:', img_rand_dwt[1][2].shape)
-
-    # if plot_img:
-    #     for i in range(nfil):
-    #         plot_dwt(get_img_dwt(img_rand_dwt, i, nfil))
-    #         plot_dwt(get_img_dwt(msk_rand_dwt, i, nfil))
-
-
-    # rand_idwt = IDWT_1lvl()
-    # img_rand_idwt = rand_idwt(img_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=img_crop.shape[1])
-    # msk_rand_idwt = rand_idwt(msk_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=msk_crop.shape[1])
-
-    # print('IDWT rand:', img_rand_idwt.shape)
-
-    # if plot_img:
-    #     plot_idwt(img_rand_idwt, img_crop)
-    #     plot_idwt(msk_rand_idwt, msk_crop)
-    
-    # test WaveNetX
-    ver = latest_ver
-    if '--ver 0' in sys.argv:
-        ver = 0
-    elif '-ver 1' in sys.argv:
-        ver = 1
-
-    model = wavenetx(in_channels=3, num_classes=2, version=ver, flen_start=2, nfil_start=2, flen_step=2, nfil_step=2, nflens=8)
-
-    pred = model(img_crop)
-
-    fb_hi_loss = model.dwt.get_fb_hi_0_mean_loss().detach().cpu().numpy()
-
-    print('FB_HI Loss:', fb_hi_loss)
+    img_dwt2 = pywt.dwt2(img_crop.squeeze(0).numpy(), wavelet)
+    msk_dwt2 = pywt.dwt2(msk_crop.squeeze(0).numpy(), wavelet)
 
     if plot_img:
-        plt.figure()
-        plt.subplot(1, 2, 1)
-        plt.imshow(pred[0,0].detach().cpu().numpy(), cmap='gray')
-        plt.title('Channel 0')
-        plt.axis('off')
-        plt.subplot(1, 2, 2)
-        plt.imshow(pred[0,1].detach().cpu().numpy(), cmap='gray')
-        plt.title('Channel 1')
-        plt.axis('off')
+        plot_dwt(img_dwt2)
+        plot_dwt(msk_dwt2)
+
+    print('LL '+wletstr+' img:', img_dwt2[0].shape)
+    print('LH '+wletstr+' img:', img_dwt2[1][0].shape)
+    print('HL '+wletstr+' img:', img_dwt2[1][1].shape)
+    print('HH '+wletstr+' img:', img_dwt2[1][2].shape)
+    print('LL '+wletstr+' msk:', msk_dwt2[0].shape)
+    print('LH '+wletstr+' msk:', msk_dwt2[1][0].shape)
+    print('HL '+wletstr+' msk:', msk_dwt2[1][1].shape)
+    print('HH '+wletstr+' msk:', msk_dwt2[1][2].shape)
+
+    dwt_layer = DWT_1lvl(fb_lo=wavelet.dec_lo)
+    img_dwt = dwt_layer(img_crop)
+    msk_dwt = dwt_layer(msk_crop)
+
+    print('LL img:', img_dwt[0].shape)
+    print('LH img:', img_dwt[1][0].shape)
+    print('HL img:', img_dwt[1][1].shape)
+    print('HH img:', img_dwt[1][2].shape)
+
+    if plot_img:
+        plot_dwt(img_dwt)
+
+    # Show mse between pywt and random layer
+    mse_ll = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[0]).unsqueeze(0), img_dwt[0])
+    mse_lh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][0]).unsqueeze(0), img_dwt[1][0])
+    mse_hl = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][1]).unsqueeze(0), img_dwt[1][1])
+    mse_hh = torch.nn.functional.mse_loss(torch.tensor(img_dwt2[1][2]).unsqueeze(0), img_dwt[1][2])
+
+    print(('MSE LL  : '+df+'; MSE LH: '+df+'; MSE HL: '+df+'; MSE HH: '+df) % (mse_ll, mse_lh, mse_hl, mse_hh))
+
+    ## IDWT
+
+    # test idwt2 from pywt
+    img_idwt2 = pywt.idwt2(img_dwt2, wavelet)
+    msk_idwt2 = pywt.idwt2(msk_dwt2, wavelet)
+
+    if plot_img:
+        plot_idwt(img_idwt2, img_crop)
+        plot_idwt(msk_idwt2, msk_crop)
+
+    idwt_layer = IDWT_1lvl(out_channels=img_crop.shape[1])
+    img_idwt = idwt_layer(img_dwt, dwt_fb_lo=dwt_layer.fb_lo)
+        
+    # show mse between pywt and manual layer
+    mse_idwt = torch.nn.functional.mse_loss(torch.tensor(img_idwt2).unsqueeze(0), img_idwt)
+    print(('MSE IDWT: '+df) % mse_idwt)
+
+    if plot_img:
+        plot_idwt(img_idwt, img_crop)
+
+    nfil = 16
+    flen = 8    
+    rand_dwt = DWT_1lvl(nfil=nfil, flen=flen)
+
+    img_rand_dwt = rand_dwt(img_crop)
+    msk_rand_dwt = rand_dwt(msk_crop)
+
+    print('LL rand:', img_rand_dwt[0].shape)
+    print('LH rand:', img_rand_dwt[1][0].shape)
+    print('HL rand:', img_rand_dwt[1][1].shape)
+    print('HH rand:', img_rand_dwt[1][2].shape)
+
+    if plot_img:
+        for i in range(nfil):
+            plot_dwt(get_img_dwt(img_rand_dwt, i, nfil))
+            plot_dwt(get_img_dwt(msk_rand_dwt, i, nfil))
+
+
+    rand_idwt = IDWT_1lvl()
+    img_rand_idwt = rand_idwt(img_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=img_crop.shape[1])
+    msk_rand_idwt = rand_idwt(msk_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=msk_crop.shape[1])
+
+    print('IDWT rand:', img_rand_idwt.shape)
+
+    if plot_img:
+        plot_idwt(img_rand_idwt, img_crop)
+        plot_idwt(msk_rand_idwt, msk_crop)
+    
+    # # test WaveNetX
+    # ver = latest_ver
+    # if '--ver 0' in sys.argv:
+    #     ver = 0
+    # elif '-ver 1' in sys.argv:
+    #     ver = 1
+
+    # model = wavenetx(in_channels=3, num_classes=2, version=ver, flen_start=2, nfil_start=2, flen_step=2, nfil_step=2, nflens=8)
+
+    # pred = model(img_crop)
+
+    # fb_hi_loss = model.dwt.get_fb_hi_0_mean_loss().detach().cpu().numpy()
+
+    # print('FB_HI Loss:', fb_hi_loss)
+
+    # if plot_img:
+    #     plt.figure()
+    #     plt.subplot(1, 2, 1)
+    #     plt.imshow(pred[0,0].detach().cpu().numpy(), cmap='gray')
+    #     plt.title('Channel 0')
+    #     plt.axis('off')
+    #     plt.subplot(1, 2, 2)
+    #     plt.imshow(pred[0,1].detach().cpu().numpy(), cmap='gray')
+    #     plt.title('Channel 1')
+    #     plt.axis('off')
 
     if plot_img:
         plt.show()
