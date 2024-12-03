@@ -168,6 +168,8 @@ class IDWT_1lvl(nn.Module):
 
 NFLENS = 8
 
+# bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 8 -l 2 -e 1000 -s 60  -w 30 --bs_step 90 --max_bs_steps 2 --fbl0 0.1 --fbl1 0.01 --seed 136 --nfil_step 0 --flen_step 4 --nfil 9 --nfil_step -1 --flen 2 -g 0.8
+
 class DWT_mtap(nn.Module):
 
     def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None,
@@ -208,7 +210,8 @@ class DWT_mtap(nn.Module):
         self.inp_channels = inp_channels
 
         # add scales for losses based on filter lengths: larger flen -> higher loss scale
-        self.loss_scales = torch.tensor([flen / self.flen_max for flen in self.flens])
+        _loss_offset = 4
+        self.loss_scales = torch.tensor([(flen + _loss_offset) / (self.flen_max + _loss_offset) for flen in self.flens])
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
 
     
@@ -226,7 +229,7 @@ class DWT_mtap(nn.Module):
             padl += 1
         return [padl, padr, padt, padb]
     
-    def get_fb_2d_list(self, inp_channels = None, for_vis=False):
+    def get_fb_2d_list(self, inp_channels = None, for_vis=False, fix_zero = False):
         if inp_channels is None:
             inp_channels = self.inp_channels
         fb_ll, fb_lh, fb_hl, fb_hh = [], [], [], []
@@ -246,6 +249,15 @@ class DWT_mtap(nn.Module):
                 _fb_lh = _fb_lh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_hl = _fb_hl.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_hh = _fb_hh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
+            else:
+                # map tp [0, 1] for visualization
+                _max = torch.max(torch.tensor([_fb_ll.max(), _fb_lh.max(), _fb_hl.max(), _fb_hh.max()]))
+                _min = torch.min(torch.tensor([_fb_ll.min(), _fb_lh.min(), _fb_hl.min(), _fb_hh.min()]))
+                _maxx = torch.max(torch.tensor([_max.abs(), _min.abs()]))
+                _fb_ll = (_fb_ll/_maxx + 1) / 2
+                _fb_lh = (_fb_lh/_maxx + 1) / 2
+                _fb_hl = (_fb_hl/_maxx + 1) / 2
+                _fb_hh = (_fb_hh/_maxx + 1) / 2
 
             pads = [(self.flen_max - _fb_lo.shape[1]) // 2] * 4
             _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=0)
@@ -928,12 +940,6 @@ class WaveNetXv2(nn.Module):
     
 latest_ver = 2
 
-def get_img_dwt(img_dwt2, fil_idx=0, nfil=1):
-    img_idx_dwt = [None, None]
-    img_idx_dwt[0] = img_dwt2[0][:,fil_idx::nfil].detach().numpy()
-    img_idx_dwt[1] = [img_dwt2[1][0][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][1][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][2][:,fil_idx::nfil].detach().numpy()]
-    return img_idx_dwt
-
 def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS):
     if version > latest_ver:
         raise ValueError(('WaveNetXv%d model is not available yet') % version)
@@ -952,6 +958,12 @@ def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4,
         model = WaveNetXv2(in_channels, num_classes, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=nflens)
     init_weights(model, 'kaiming')
     return model
+
+def get_img_dwt(img_dwt2, fil_idx=0, nfil=1):
+    img_idx_dwt = [None, None]
+    img_idx_dwt[0] = img_dwt2[0][:,fil_idx::nfil].detach().numpy()
+    img_idx_dwt[1] = [img_dwt2[1][0][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][1][:,fil_idx::nfil].detach().numpy(), img_dwt2[1][2][:,fil_idx::nfil].detach().numpy()]
+    return img_idx_dwt
 
 def plot_dwt(x_dwt, idx=0):
     if isinstance(x_dwt[0], torch.Tensor):

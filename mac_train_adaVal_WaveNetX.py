@@ -150,6 +150,12 @@ if __name__ == '__main__':
         rand_crop=True,
     )
 
+    # Print total number of images in the dataset
+    print('=' * print_num)
+    print('| Number of images in the training set: {:d}'.format(len(dataset_train_sup)).ljust(print_num_minus, ' '), '|')
+    print('| Number of images in the validation set: {:d}'.format(len(dataset_val)).ljust(print_num_minus, ' '), '|')
+    print('=' * print_num)
+
     dataloaders = dict()
     dataloaders['train_sup_0'] = DataLoader(dataset_train_sup, batch_size=args.batch_size, shuffle=True)
     dataloaders['train_sup_1'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*2, shuffle=True)
@@ -204,10 +210,11 @@ if __name__ == '__main__':
         fb_l0 = args.fbl0 * 1e-1
         fb_l1 = args.fbl1 * 1e-1
 
-        fb_l0 *= (0.6+args.gamma) ** (epoch // args.step_size)
+        fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
         fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
+
         if args.big2small:
             bs_idx = args.max_bs_steps - bs_idx
 
@@ -266,7 +273,7 @@ if __name__ == '__main__':
         # Visualization and printing training statistics
         if (count_iter % args.display_iter == 0) or args.vis:
             print('=' * print_num)
-            print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' ') + '|')
+            print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' '), '|')
             train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss = print_train_loss_WaveNetX(
                 train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_str])
             train_eval_list1, train_m_jc1, train_m_dc1 = print_train_eval_sup(cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus)
@@ -312,7 +319,7 @@ if __name__ == '__main__':
                 for f_idx in range(model1.dwt.nfil):
                     vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
             print('-' * print_num)
-            print('| Epoch Time: {:.4f}s  BS: {:2d}  |'.format((time.time() - begin_time), args.batch_size).ljust(print_num_minus, ' '), '|')
+            print('| Epoch {:d}/{:d} took {:.4f}s with batch size {:d}'.format(epoch + 1, args.num_epochs, (time.time() - begin_time), dataloaders[bs_str].batch_size).ljust(print_num_minus, ' '), '|')
     
     time_elapsed = time.time() - since
     m, s = divmod(time_elapsed, 60)
