@@ -10,7 +10,7 @@ from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from dataload.dataset_2d import imagefolder_WaveNetX
 from models.getnetwork import get_network
-from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, vis_filter_bank_WaveNetX
+from config.visdom_config.visual_visdom import visdom_initialization_XNetv2, visdom_initialization_WaveNetX, vis_filter_bank_WaveNetX
 from config.train_test_config.train_test_config import print_test_eval, save_val_best_sup_2d, print_val_loss_XNetv2, save_test_2d
 from loss.loss_function import segmentation_loss
 from warnings import simplefilter
@@ -135,7 +135,7 @@ if __name__ == '__main__':
 
     # Visualization
     if args.vis:
-        visdom = visdom_initialization_XNetv2(env=f'{args.dataset_name}-{network_name}', port=args.visdom_port)
+        visdom = visdom_initialization_WaveNetX(env=f'{args.dataset_name}-{network_name}', port=args.visdom_port)
 
     # Testing
     model.eval()
