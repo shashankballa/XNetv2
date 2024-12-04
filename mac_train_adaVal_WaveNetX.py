@@ -67,7 +67,7 @@ if __name__ == '__main__':
     parser.add_argument('--fbl1', default=1, type=float, help='fb lo orthnorm loss weight')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
-    parser.add_argument('--big2small', action='store_true', default=False, help='batch size big to small')
+    parser.add_argument('-bts', '--big2small', action='store_true', default=False, help='batch size big to small')
     parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
 
     args = parser.parse_args()
@@ -210,8 +210,8 @@ if __name__ == '__main__':
         fb_l0 = args.fbl0 * 1e-1
         fb_l1 = args.fbl1 * 1e-1
 
-        fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
-        fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
+        # fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
+        # fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
 
@@ -248,7 +248,7 @@ if __name__ == '__main__':
             loss_train_sup += loss_train_sup2
 
             if args.ver >= 2:
-                loss_train_sup3 = model1.dwt.get_fb_lo_orthnorm_loss_v2() * fb_l1
+                loss_train_sup3 = (model1.dwt.get_fb_hi_orthnorm_loss()) * fb_l1 # ADD model1.dwt.get_fb_hi_orthnorm_loss_v2()
                 train_loss_sup_3 += loss_train_sup3.item()
                 loss_train_sup += loss_train_sup3
 

@@ -11,42 +11,42 @@ from torch.nn import init
 
 class DWT_1lvl(nn.Module):
 
-    def __init__(self, fb_lo = None, flen = 8, nfil = 1, inp_channels = None,
+    def __init__(self, fb_hi = None, flen = 8, nfil = 1, inp_channels = None,
                  pad_mode="replicate"):
         '''
         DWT_1lvl: 1-level multi-filter DWT using 2D convolution
         Args:
-            fb_lo: low-pass filter bank
+            fb_hi: low-pass filter bank
             flen: filter length
             nfil: number of filters
         '''
 
         super(DWT_1lvl, self).__init__()
 
-        self.fb_lo = nn.Parameter(self.get_fb_lo(fb_lo, flen, nfil))
+        self.fb_hi = nn.Parameter(self.get_fb_hi(fb_hi, flen, nfil))
 
         # Apply orthogonal parametrization
-        # P.register_parametrization(self, 'fb_lo', nn.utils.parametrizations.orthogonal())
+        # P.register_parametrization(self, 'fb_hi', nn.utils.parametrizations.orthogonal())
 
-        self.nfil = self.fb_lo.shape[0]
-        self.flen = self.fb_lo.shape[1]
+        self.nfil = self.fb_hi.shape[0]
+        self.flen = self.fb_hi.shape[1]
         self.pad_mode = pad_mode
         self.inp_channels = inp_channels
 
-    def get_fb_lo(self, fb_lo = None, flen = 8, nfil = 1):
-        if fb_lo is None:
-            fb_lo = torch.rand((nfil, flen)) # - 0.5 # zero-mean not needed
+    def get_fb_hi(self, fb_hi = None, flen = 8, nfil = 1):
+        if fb_hi is None:
+            fb_hi = torch.rand((nfil, flen)) # - 0.5 # zero-mean not needed
         else:
-            if not isinstance(fb_lo, torch.Tensor):
-                if isinstance(fb_lo, np.ndarray) or isinstance(fb_lo, list):
-                    fb_lo = torch.tensor(fb_lo)
+            if not isinstance(fb_hi, torch.Tensor):
+                if isinstance(fb_hi, np.ndarray) or isinstance(fb_hi, list):
+                    fb_hi = torch.tensor(fb_hi)
                 else:
-                    raise ValueError('fb_lo should be a tensor or numpy array')
-            if fb_lo.dim() > 2:
-                raise ValueError('fb_lo should be a 1D or 2D tensor')
-            if fb_lo.dim() == 1:
-                fb_lo = fb_lo.unsqueeze(0)
-        return fb_lo
+                    raise ValueError('fb_hi should be a tensor or numpy array')
+            if fb_hi.dim() > 2:
+                raise ValueError('fb_hi should be a 1D or 2D tensor')
+            if fb_hi.dim() == 1:
+                fb_hi = fb_hi.unsqueeze(0)
+        return fb_hi
     
     def get_pads(self, x_shape):
         padb = (2 * self.flen - 3) // 2
@@ -62,14 +62,14 @@ class DWT_1lvl(nn.Module):
     def get_fb_2d_list(self, inp_channels = None):
         if inp_channels is None:
             inp_channels = self.inp_channels
-        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
-        fb_hi = fb_lo.flip(-1)
-        fb_hi[:, ::2] *= -1
-        # fb_hi -= fb_hi.mean(dim=-1, keepdim=True)
-        fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
-        fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
-        fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
-        fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+        fb_hi = F.normalize(self.fb_hi, p=2, dim=-1)
+        fb_lo = fb_hi.flip(-1)
+        fb_lo[:, ::2] *= -1
+        # fb_lo -= fb_lo.mean(dim=-1, keepdim=True)
+        fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+        fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
+        fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
+        fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
         # Prepare the 2D filter banks for conv2d
         fb_ll = fb_ll.view(fb_ll.shape[0], 1, fb_ll.shape[1], fb_ll.shape[2]).repeat(inp_channels, 1, 1, 1)
         fb_lh = fb_lh.view(fb_lh.shape[0], 1, fb_lh.shape[1], fb_lh.shape[2]).repeat(inp_channels, 1, 1, 1)
@@ -78,11 +78,11 @@ class DWT_1lvl(nn.Module):
         return fb_ll, fb_lh, fb_hl, fb_hh
     
     def get_fb_hi_0_mean_loss(self):
-        # Ensure that fb_hi is zero-mean
-        fb_lo = F.normalize(self.fb_lo, p=2, dim=-1)
-        fb_hi = fb_lo.flip(-1)
-        fb_hi[:, ::2] *= -1
-        return fb_hi.sum(dim=-1).abs().sum()
+        # Ensure that fb_lo is zero-mean
+        fb_hi = F.normalize(self.fb_hi, p=2, dim=-1)
+        fb_lo = fb_hi.flip(-1)
+        fb_lo[:, ::2] *= -1
+        return fb_lo.sum(dim=-1).abs().sum()
 
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
@@ -98,31 +98,31 @@ class IDWT_1lvl(nn.Module):
         super(IDWT_1lvl, self).__init__()
         self.out_channels = out_channels
     
-    def get_fb_2d_list(self, dwt_fb_lo=None, dwt_fb_los=None, out_channels=None):
-        if dwt_fb_los is None:
-            if dwt_fb_lo is None:
-                raise ValueError('Both dwt_fb_lo and dwt_fb_los cannot be None')
-            dwt_fb_los = [dwt_fb_lo]
+    def get_fb_2d_list(self, dwt_fb_hi=None, dwt_fb_his=None, out_channels=None):
+        if dwt_fb_his is None:
+            if dwt_fb_hi is None:
+                raise ValueError('Both dwt_fb_hi and dwt_fb_his cannot be None')
+            dwt_fb_his = [dwt_fb_hi]
         if out_channels is None:
             out_channels = self.out_channels
 
-        max_flen = max([_fb_lo.shape[1] for _fb_lo in dwt_fb_los])
+        max_flen = max([_fb_hi.shape[1] for _fb_hi in dwt_fb_his])
 
         fb_ll, fb_lh, fb_hl, fb_hh = [], [], [], []
-        for _fb_lo in dwt_fb_los:
-            _nfil, _flen = _fb_lo.shape
-            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
+        for _fb_hi in dwt_fb_his:
+            _nfil, _flen = _fb_hi.shape
+            fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
             # Generate high-pass filters by flipping and changing signs
-            fb_hi = fb_lo.flip(-1)
-            fb_hi[:, ::2] *= -1
-            fb_lo = fb_lo.flip(-1) # flip the Synthesis filters
-            fb_hi = fb_hi.flip(-1)
+            fb_lo = fb_hi.flip(-1)
+            fb_lo[:, ::2] *= -1
+            fb_hi = fb_hi.flip(-1) # flip the Synthesis filters
+            fb_lo = fb_lo.flip(-1)
             flip_dims = (-1, -2)
-            _fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            pads = [(max_flen - _fb_lo.shape[1]) // 2] * 4
+            _fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            pads = [(max_flen - _fb_hi.shape[1]) // 2] * 4
             fb_ll.append(F.pad(_fb_ll, pads, mode='constant', value=0))
             fb_lh.append(F.pad(_fb_lh, pads, mode='constant', value=0))
             fb_hl.append(F.pad(_fb_hl, pads, mode='constant', value=0))
@@ -154,10 +154,10 @@ class IDWT_1lvl(nn.Module):
             x = x[..., :-padr]
         return x
     
-    def forward(self, x: Tuple, dwt_fb_lo: torch.Tensor = None, dwt_fb_los: torch.Tensor = None, out_channels: int = None) -> torch.Tensor:
+    def forward(self, x: Tuple, dwt_fb_hi: torch.Tensor = None, dwt_fb_his: torch.Tensor = None, out_channels: int = None) -> torch.Tensor:
         if out_channels is None:
             out_channels = self.out_channels
-        fb = self.get_fb_2d_list(dwt_fb_lo=dwt_fb_lo, dwt_fb_los=dwt_fb_los, out_channels=out_channels)
+        fb = self.get_fb_2d_list(dwt_fb_hi=dwt_fb_hi, dwt_fb_his=dwt_fb_his, out_channels=out_channels)
         x_idwt = F.conv_transpose2d(x[0], fb[0].to(x[0].device), stride=2, groups=out_channels) + \
                     F.conv_transpose2d(x[1][0], fb[1].to(x[1][0].device), stride=2, groups=out_channels) + \
                     F.conv_transpose2d(x[1][1], fb[2].to(x[1][1].device), stride=2, groups=out_channels) + \
@@ -166,7 +166,7 @@ class IDWT_1lvl(nn.Module):
         x_idwt = self.safe_unpad(x_idwt, flen)
         return x_idwt
 
-NFLENS = 5
+NFLENS = 4
 SYMNFIL = False
 
 # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 8 -l 2 -e 1000 -s 60  -w 30 --bs_step 90 --max_bs_steps 2 --fbl0 0.1 --fbl1 0.004 --seed 136 --nfil_step 0 --flen_step 4 --nfil 1 --nfil_step 1 --flen 2 -g 0.8
@@ -206,15 +206,15 @@ class DWT_mtap(nn.Module):
             self.nfils = torch.tensor([nfil_start + self.nfil_step*i for i in range(self.nflens)])
 
         self.nfil = torch.sum(self.nfils)
-        self.fb_los0, self.fb_los1, self.fb_los2, self.fb_los3, self.fb_los4, self.fb_los5, self.fb_los6, self.fb_los7 = None, None, None, None, None, None, None, None
-        if self.nflens >= 1: self.fb_los0 = nn.Parameter(torch.rand((self.nfils[0], self.flens[0])))
-        if self.nflens >= 2: self.fb_los1 = nn.Parameter(torch.rand((self.nfils[1], self.flens[1])))
-        if self.nflens >= 3: self.fb_los2 = nn.Parameter(torch.rand((self.nfils[2], self.flens[2])))
-        if self.nflens >= 4: self.fb_los3 = nn.Parameter(torch.rand((self.nfils[3], self.flens[3])))
-        if self.nflens >= 5: self.fb_los4 = nn.Parameter(torch.rand((self.nfils[4], self.flens[4])))
-        if self.nflens >= 6: self.fb_los5 = nn.Parameter(torch.rand((self.nfils[5], self.flens[5])))
-        if self.nflens >= 7: self.fb_los6 = nn.Parameter(torch.rand((self.nfils[6], self.flens[6])))
-        if self.nflens >= 8: self.fb_los7 = nn.Parameter(torch.rand((self.nfils[7], self.flens[7])))
+        self.fb_his0, self.fb_his1, self.fb_his2, self.fb_his3, self.fb_his4, self.fb_his5, self.fb_his6, self.fb_his7 = None, None, None, None, None, None, None, None
+        if self.nflens >= 1: self.fb_his0 = nn.Parameter(torch.rand((self.nfils[0], self.flens[0])) - 0.5)
+        if self.nflens >= 2: self.fb_his1 = nn.Parameter(torch.rand((self.nfils[1], self.flens[1])) - 0.5)
+        if self.nflens >= 3: self.fb_his2 = nn.Parameter(torch.rand((self.nfils[2], self.flens[2])) - 0.5)
+        if self.nflens >= 4: self.fb_his3 = nn.Parameter(torch.rand((self.nfils[3], self.flens[3])) - 0.5)
+        if self.nflens >= 5: self.fb_his4 = nn.Parameter(torch.rand((self.nfils[4], self.flens[4])) - 0.5)
+        if self.nflens >= 6: self.fb_his5 = nn.Parameter(torch.rand((self.nfils[5], self.flens[5])) - 0.5)
+        if self.nflens >= 7: self.fb_his6 = nn.Parameter(torch.rand((self.nfils[6], self.flens[6])) - 0.5)
+        if self.nflens >= 8: self.fb_his7 = nn.Parameter(torch.rand((self.nfils[7], self.flens[7])) - 0.5)
         self.pad_mode = pad_mode
         self.inp_channels = inp_channels
 
@@ -224,9 +224,9 @@ class DWT_mtap(nn.Module):
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
 
     
-    def get_fb_lo_list(self):
-        fb_lo_list = [self.fb_los0, self.fb_los1, self.fb_los2, self.fb_los3, self.fb_los4, self.fb_los5, self.fb_los6, self.fb_los7]
-        return fb_lo_list[:self.nflens]
+    def get_fb_hi_list(self):
+        fb_hi_list = [self.fb_his0, self.fb_his1, self.fb_his2, self.fb_his3, self.fb_his4, self.fb_his5, self.fb_his6, self.fb_his7]
+        return fb_hi_list[:self.nflens]
     
     def get_pads(self, x_shape):
         padb = (2 * self.flen_max - 3) // 2
@@ -243,16 +243,16 @@ class DWT_mtap(nn.Module):
         if inp_channels is None:
             inp_channels = self.inp_channels
         fb_ll, fb_lh, fb_hl, fb_hh = [], [], [], []
-        for _fb_lo in self.get_fb_lo_list():
-            _nfil, _flen = _fb_lo.shape
-            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
-            fb_hi = fb_lo.flip(-1)
-            fb_hi[:, ::2] *= -1
-            # fb_hi -= fb_hi.mean(dim=-1, keepdim=True)
-            _fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
-            _fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
-            _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
-            _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+        for _fb_hi in self.get_fb_hi_list():
+            _nfil, _flen = _fb_hi.shape
+            fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            fb_lo = fb_hi.flip(-1)
+            fb_lo[:, ::2] *= -1
+            # fb_lo -= fb_lo.mean(dim=-1, keepdim=True)
+            _fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+            _fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
+            _fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
+            _fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
 
             _padval = 0
             if not for_vis:
@@ -271,7 +271,7 @@ class DWT_mtap(nn.Module):
                 _fb_hh = (_fb_hh/_maxx + 1) / 2
                 _padval = 0.5
 
-            pads = [(self.flen_max - _fb_lo.shape[1]) // 2] * 4
+            pads = [(self.flen_max - _fb_hi.shape[1]) // 2] * 4
             _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=_padval)
             _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=_padval)
             _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=_padval)
@@ -289,20 +289,18 @@ class DWT_mtap(nn.Module):
         return fb_ll, fb_lh, fb_hl, fb_hh
     
     def get_fb_hi_0_mean_loss(self):
-        # Ensure that fb_hi is zero-mean
+        # Ensure that fb_lo is zero-mean
         fb_hi_loss = 0.0
         f_idx = 0
-        for _fb_lo in self.get_fb_lo_list():
-            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
-            fb_hi = fb_lo.flip(-1)
-            fb_hi[:, ::2] *= -1
+        for _fb_hi in self.get_fb_hi_list():
+            fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
             fb_hi_loss += fb_hi.sum(dim=-1).abs().sum() * self.loss_scales[f_idx]
             f_idx += 1
         return fb_hi_loss
     
-    def get_fb_lo_orthnorm_loss(self):
+    def get_fb_hi_orthnorm_loss(self):
         """
-        Compute orthonormality loss for all fb_lo filter banks in DWT_mtap.
+        Compute orthonormality loss for all fb_hi filter banks in DWT_mtap.
         Ensures that the rows of each filter bank are orthogonal and unit norm.
 
         Returns:
@@ -310,12 +308,12 @@ class DWT_mtap(nn.Module):
         """
         orthonormal_loss = 0.0
         f_idx = 0
-        for _fb_lo in self.get_fb_lo_list():
+        for _fb_hi in self.get_fb_hi_list():
             # Normalize the filter bank rows
-            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
+            fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
 
             # Compute Gram matrix: G = W * W^T
-            gram_matrix = _fb_lo @ _fb_lo.T
+            gram_matrix = _fb_hi @ _fb_hi.T
 
             # Orthonormality loss: ||G - I||_F^2
             identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
@@ -324,29 +322,27 @@ class DWT_mtap(nn.Module):
             f_idx += 1
         return orthonormal_loss
     
-
-    def get_fb_lo_orthnorm_loss_v2(self, _nrows_fac=0.7):
+    def get_fb_hi_orthnorm_loss_v2(self, _nrows_fac=4):
         """
         Pad all filter banks symmetrically to the maximum filter length and stack them together.
         If the total number of filters `nfil` is less than the half maximum filter length `flen_max`,
         then split filter banks alternately into `nfil/_nrows_dvsr` rows and stack them together.
         """
         orth_loss = 0.0
-        fb_los = self.get_fb_lo_list()
-        fb_los = [F.normalize(fb_lo, p=2, dim=-1) for fb_lo in fb_los]
-        fb_los = [F.pad(fb_lo, (self.flen_max - fb_lo.shape[1] // 2, self.flen_max - fb_lo.shape[1] // 2), mode='constant', value=0) for fb_lo in fb_los]
-        fb_los = torch.cat(fb_los, dim=0)
+        fb_his = self.get_fb_hi_list()
+        fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
+        fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
+        fb_his = torch.cat(fb_his, dim=0)
         n_rows = (self.flen_max * _nrows_fac).int()
-        n_splits = torch.ceil(fb_los.shape[0]/n_rows).int()
+        n_splits = torch.ceil(fb_his.shape[0]/n_rows).int()
         for i in range(n_splits):
-            _fb_lo_split = fb_los[i::n_splits]
-            gram_matrix = _fb_lo_split @ _fb_lo_split.T
+            _fb_hi_split = fb_his[i::n_splits]
+            gram_matrix = _fb_hi_split @ _fb_hi_split.T
             identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
             _loss = torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
             orth_loss += _loss
 
         return orth_loss
-
     
     def forward(self, x):
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
@@ -412,11 +408,11 @@ class up_conv(nn.Module):
 
 class WaveNetXv0(nn.Module):
 
-    def __init__(self, in_channels=3, num_classes=1, fb_lo=None, flen=8, nfil=1):
+    def __init__(self, in_channels=3, num_classes=1, fb_hi=None, flen=8, nfil=1):
         super(WaveNetXv0, self).__init__()
 
         # wavelet block
-        self.dwt = DWT_1lvl(fb_lo=fb_lo, flen=flen, nfil=nfil)
+        self.dwt = DWT_1lvl(fb_hi=fb_hi, flen=flen, nfil=nfil)
     
         # main network
         self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
@@ -594,11 +590,11 @@ class WaveNetXv0(nn.Module):
 
 class WaveNetXv1(nn.Module):
 
-    def __init__(self, in_channels=3, num_classes=1, fb_lo=None, flen=8, nfil=1):
+    def __init__(self, in_channels=3, num_classes=1, fb_hi=None, flen=8, nfil=1):
         super(WaveNetXv1, self).__init__()
 
         # wavelet block
-        self.dwt = DWT_1lvl(fb_lo=fb_lo, flen=flen, nfil=nfil, inp_channels=in_channels)
+        self.dwt = DWT_1lvl(fb_hi=fb_hi, flen=flen, nfil=nfil, inp_channels=in_channels)
         self.idwt = IDWT_1lvl(out_channels=num_classes)
     
         # main network
@@ -776,7 +772,7 @@ class WaveNetXv1(nn.Module):
         H_d1 = H_d1.chunk(3, dim=1)
 
         # IDWT
-        M_d0 = self.idwt([L_d1, H_d1], self.dwt.fb_lo) 
+        M_d0 = self.idwt([L_d1, H_d1], self.dwt.fb_hi) 
 
         # shrink M_d0 to the original size
         M_d0 = F.interpolate(M_d0, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
@@ -967,7 +963,7 @@ class WaveNetXv2(nn.Module):
         H_d1 = H_d1.chunk(3, dim=1)
 
         # IDWT
-        M_d0 = self.idwt([L_d1, H_d1], dwt_fb_los=self.dwt.get_fb_lo_list())
+        M_d0 = self.idwt([L_d1, H_d1], dwt_fb_his=self.dwt.get_fb_hi_list())
 
         # shrink M_d0 to the original size
         M_d0 = F.interpolate(M_d0, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
@@ -982,7 +978,7 @@ class WaveNetXv3(nn.Module):
         # wavelet block
         self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=NFLENS, inp_channels=in_channels)
         self.idwt = IDWT_1lvl(out_channels=num_classes)
-    
+
         # main network
         self.M_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.M_Conv1 = conv_block(ch_in=in_channels, ch_out=64)
@@ -1002,8 +998,10 @@ class WaveNetXv3(nn.Module):
         self.M_Conv_1x1 = nn.Conv2d(64, num_classes, kernel_size=1, stride=1, padding=0)
 
         # L network
+        self.L_dwt_att_conv = nn.Conv2d(in_channels*2, 32, kernel_size=1, stride=1, padding=0)
+        self.L_dwt_att_actv = nn.Sigmoid()
         self.L_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.L_Conv1 = conv_block(ch_in=self.dwt.nfil*2*in_channels, ch_out=64)
+        self.L_Conv1 = conv_block(ch_in=32, ch_out=64)
         self.L_Conv2 = conv_block(ch_in=64, ch_out=128)
         self.L_Conv3 = conv_block(ch_in=128, ch_out=256)
         self.L_Conv4 = conv_block(ch_in=256, ch_out=512)
@@ -1017,9 +1015,14 @@ class WaveNetXv3(nn.Module):
         self.L_Up_conv3 = conv_block(ch_in=256, ch_out=128)
         self.L_Up2 = up_conv(ch_in=128, ch_out=64)
         self.L_Up_conv2 = conv_block(ch_in=128, ch_out=64)
-        self.L_Conv_1x1 = nn.Conv2d(64, 2*self.dwt.nfil*num_classes, kernel_size=1, stride=1, padding=0)
+        self.L_Up3 = up_conv(ch_in=64, ch_out=32)
+        self.L_Up_conv3 = conv_block(ch_in=64, ch_out=32)
+        self.L_idwt_att_conv = nn.Conv2d(32, 2*self.dwt.nfil*num_classes, kernel_size=1, stride=1, padding=0)
+        self.L_idwt_att_act = nn.Sigmoid()
 
         # H network
+        self.H_dwt_att_conv = nn.Conv2d(in_channels*2, 32, kernel_size=1, stride=1, padding=0)
+        self.H_dwt_att_actv = nn.Sigmoid()
         self.H_Maxpool = nn.MaxPool2d(kernel_size=2, stride=2)
         self.H_Conv1 = conv_block(ch_in=self.dwt.nfil*2*in_channels, ch_out=64)
         self.H_Conv2 = conv_block(ch_in=64, ch_out=128)
@@ -1035,7 +1038,10 @@ class WaveNetXv3(nn.Module):
         self.H_Up_conv3 = conv_block(ch_in=256, ch_out=128)
         self.H_Up2 = up_conv(ch_in=128, ch_out=64)
         self.H_Up_conv2 = conv_block(ch_in=128, ch_out=64)
-        self.H_Conv_1x1 = nn.Conv2d(64, 2*self.dwt.nfil*num_classes, kernel_size=1, stride=1, padding=0)
+        self.H_Up3 = up_conv(ch_in=64, ch_out=32)
+        self.H_Up_conv3 = conv_block(ch_in=64, ch_out=32)
+        self.H_idwt_att_conv = nn.Conv2d(32, 2*self.dwt.nfil*num_classes, kernel_size=1, stride=1, padding=0)
+        self.H_idwt_att_act = nn.Sigmoid()
 
         # fusion
         self.M_H_Conv1 = conv_block(ch_in=128, ch_out=64)
@@ -1044,18 +1050,11 @@ class WaveNetXv3(nn.Module):
         self.M_L_Conv4 = conv_block(ch_in=1024, ch_out=512)
 
     def forward(self, x_main, *args, **kwargs): #ignore excess
-        # main encoder
 
+        # DWT
         x_LL, (x_LH, x_HL, x_HH) = self.dwt(x_main)
-        # x_H = x_HL + x_LH + x_HH
 
-        x_L = torch.cat((x_LL, x_HH), dim=1)
-        x_H = torch.cat((x_LH, x_HL), dim=1)
-
-        # Resize x_L and x_H to match the spatial dimensions of x_main
-        x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
-        x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
-
+        # main encoder
         M_x1 = self.M_Conv1(x_main)
         M_x2 = self.M_Maxpool(M_x1)
         M_x2 = self.M_Conv2(M_x2)
@@ -1067,6 +1066,10 @@ class WaveNetXv3(nn.Module):
         M_x5 = self.M_Conv5(M_x5)
 
         # L encoder
+        x_L = torch.cat((x_LL, x_HH), dim=1)
+        x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        L_x1 = self.L_dwt_att_actv(self.L_dwt_att_conv(torch.cat((x_main, x_LL), dim=1))) * x_LL
+
         L_x1 = self.L_Conv1(x_L)
         L_x2 = self.L_Maxpool(L_x1)
         L_x2 = self.L_Conv2(L_x2)
@@ -1078,6 +1081,10 @@ class WaveNetXv3(nn.Module):
         L_x5 = self.L_Conv5(L_x5)
 
         # H encoder
+        x_H = torch.cat((x_LH, x_HL), dim=1)
+        x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        H_x1 = self.H_dwt_att_actv(self.H_dwt_att_conv(torch.cat((x_main, x_LH, x_HL), dim=1))) * x_LH
+
         H_x1 = self.H_Conv1(x_H)
         H_x2 = self.H_Maxpool(H_x1)
         H_x2 = self.H_Conv2(H_x2)
@@ -1098,25 +1105,6 @@ class WaveNetXv3(nn.Module):
         M_L_x4 = torch.cat((M_x4, L_x4), dim=1)
         M_L_x4 = self.M_L_Conv4(M_L_x4)
 
-        # main decoder
-
-        M_d5 = self.M_Up5(M_x5)
-        M_d5 = torch.cat((M_L_x4, M_d5), dim=1)
-        M_d5 = self.M_Up_conv5(M_d5)
-
-        M_d4 = self.M_Up4(M_d5)
-        M_d4 = torch.cat((M_L_x3, M_d4), dim=1)
-        M_d4 = self.M_Up_conv4(M_d4)
-
-        M_d3 = self.M_Up3(M_d4)
-        M_d3 = torch.cat((M_H_x2, M_d3), dim=1)
-        M_d3 = self.M_Up_conv3(M_d3)
-
-        M_d2 = self.M_Up2(M_d3)
-        M_d2 = torch.cat((M_H_x1, M_d2), dim=1)
-        M_d2 = self.M_Up_conv2(M_d2)
-        M_d1 = self.M_Conv_1x1(M_d2)
-
         # L decoder
         L_d5 = self.L_Up5(L_x5)
         L_d5 = torch.cat((M_L_x4, L_d5), dim=1)
@@ -1136,6 +1124,9 @@ class WaveNetXv3(nn.Module):
 
         L_d1 = self.L_Conv_1x1(L_d2) # ll, hh components
 
+        L_d1 = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
+        L_d1 = L_d1.chunk(2, dim=1)
+
         # H decoder
         H_d5 = self.H_Up5(H_x5)
         H_d5 = torch.cat((H_x4, H_d5), dim=1)
@@ -1154,15 +1145,26 @@ class WaveNetXv3(nn.Module):
         H_d2 = self.H_Up_conv2(H_d2)
 
         H_d1 = self.H_Conv_1x1(H_d2) # lh, hl components
-        
-        # split L_d1 into LL, HH
-        L_d1 = L_d1.chunk(2, dim=1)
-
-        # split H_d1 into LH, HL
         H_d1 = H_d1.chunk(2, dim=1)
 
-        # IDWT
-        M_d0 = self.idwt([L_d1[0], [H_d1[0], H_d1[1], L_d1[1]]], dwt_fb_los=self.dwt.get_fb_lo_list())
+        # main decoder
+
+        M_d5 = self.M_Up5(M_x5)
+        M_d5 = torch.cat((M_L_x4, M_d5), dim=1)
+        M_d5 = self.M_Up_conv5(M_d5)
+
+        M_d4 = self.M_Up4(M_d5)
+        M_d4 = torch.cat((M_L_x3, M_d4), dim=1)
+        M_d4 = self.M_Up_conv4(M_d4)
+
+        M_d3 = self.M_Up3(M_d4)
+        M_d3 = torch.cat((M_H_x2, M_d3), dim=1)
+        M_d3 = self.M_Up_conv3(M_d3)
+
+        M_d2 = self.M_Up2(M_d3)
+        M_d2 = torch.cat((M_H_x1, M_d2), dim=1)
+        M_d2 = self.M_Up_conv2(M_d2)
+        M_d1 = self.M_Conv_1x1(M_d2)
 
         # shrink M_d0 to the original size
         M_d0 = F.interpolate(M_d0, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
@@ -1295,7 +1297,7 @@ def plot_fil(fil, fil_hi=None):
         fil_hi = fil_hi.squeeze()
 
         if len(fil_hi.shape) != 1:
-            raise ValueError('fb_hi should be a 1D tensor')
+            raise ValueError('fb_lo should be a 1D tensor')
         plt.figure()
         plt.bar(range(fil.shape[0]), fil.numpy(), label='Low-pass FB')
         plt.bar(range(fil_hi.shape[0]), fil_hi.numpy(), label='High-pass FB', alpha=0.7)
@@ -1458,7 +1460,7 @@ if __name__ == '__main__':
     print('HL '+wletstr+' msk:', msk_dwt2[1][1].shape)
     print('HH '+wletstr+' msk:', msk_dwt2[1][2].shape)
 
-    dwt_layer = DWT_1lvl(fb_lo=wavelet.dec_lo)
+    dwt_layer = DWT_1lvl(fb_hi=wavelet.dec_lo)
     img_dwt = dwt_layer(img_crop)
     msk_dwt = dwt_layer(msk_crop)
 
@@ -1489,7 +1491,7 @@ if __name__ == '__main__':
         plot_idwt(msk_idwt2, msk_crop)
 
     idwt_layer = IDWT_1lvl(out_channels=img_crop.shape[1])
-    img_idwt = idwt_layer(img_dwt, dwt_fb_lo=dwt_layer.fb_lo)
+    img_idwt = idwt_layer(img_dwt, dwt_fb_hi=dwt_layer.fb_hi)
         
     # show mse between pywt and manual layer
     mse_idwt = torch.nn.functional.mse_loss(torch.tensor(img_idwt2).unsqueeze(0), img_idwt)
@@ -1517,8 +1519,8 @@ if __name__ == '__main__':
 
 
     rand_idwt = IDWT_1lvl()
-    img_rand_idwt = rand_idwt(img_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=img_crop.shape[1])
-    msk_rand_idwt = rand_idwt(msk_rand_dwt, dwt_fb_lo=rand_dwt.fb_lo, out_channels=msk_crop.shape[1])
+    img_rand_idwt = rand_idwt(img_rand_dwt, dwt_fb_hi=rand_dwt.fb_hi, out_channels=img_crop.shape[1])
+    msk_rand_idwt = rand_idwt(msk_rand_dwt, dwt_fb_hi=rand_dwt.fb_hi, out_channels=msk_crop.shape[1])
 
     print('IDWT rand:', img_rand_idwt.shape)
 
@@ -1537,9 +1539,9 @@ if __name__ == '__main__':
 
     # pred = model(img_crop)
 
-    # fb_hi_loss = model.dwt.get_fb_hi_0_mean_loss().detach().cpu().numpy()
+    # fb_lo_loss = model.dwt.get_fb_hi_0_mean_loss().detach().cpu().numpy()
 
-    # print('FB_HI Loss:', fb_hi_loss)
+    # print('FB_HI Loss:', fb_lo_loss)
 
     # if plot_img:
     #     plt.figure()
