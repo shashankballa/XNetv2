@@ -59,7 +59,7 @@ class DWT_1lvl(nn.Module):
             padl += 1
         return [padl, padr, padt, padb]
     
-    def get_fb_2d_list(self, inp_channels = None):
+    def get_fb_2d_list(self, inp_channels = None, *args, **kwargs): #ignore excess
         if inp_channels is None:
             inp_channels = self.inp_channels
         fb_hi = F.normalize(self.fb_hi, p=2, dim=-1)
@@ -84,13 +84,15 @@ class DWT_1lvl(nn.Module):
         fb_lo[:, ::2] *= -1
         return fb_lo.sum(dim=-1).abs().sum()
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs): #ignore excess
         x_pad = F.pad(x, self.get_pads(x.shape), mode=self.pad_mode)
+        print("Running v1")
         fb_ll, fb_lh, fb_hl, fb_hh = self.get_fb_2d_list(inp_channels=x.shape[1])
         x_ll = F.conv2d(x_pad, fb_ll.to(x_pad.device), stride=2, groups=x.shape[1])
         x_lh = F.conv2d(x_pad, fb_lh.to(x_pad.device), stride=2, groups=x.shape[1])
         x_hl = F.conv2d(x_pad, fb_hl.to(x_pad.device), stride=2, groups=x.shape[1])
         x_hh = F.conv2d(x_pad, fb_hh.to(x_pad.device), stride=2, groups=x.shape[1])
+
         return x_ll, (x_lh, x_hl, x_hh)
 
 class IDWT_1lvl(nn.Module):
