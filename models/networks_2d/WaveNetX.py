@@ -221,7 +221,7 @@ class DWT_mtap(nn.Module):
         self.inp_channels = inp_channels
 
         # add scales for losses based on filter lengths: larger flen -> higher loss scale
-        _loss_offset = 4
+        _loss_offset = self.flen_max // 2
         self.loss_scales = torch.tensor([(flen + _loss_offset) / (self.flen_max + _loss_offset) for flen in self.flens])
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
 
@@ -312,7 +312,7 @@ class DWT_mtap(nn.Module):
         f_idx = 0
         for _fb_hi in self.get_fb_hi_list():
             # Normalize the filter bank rows
-            fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            _fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
 
             # Compute Gram matrix: G = W * W^T
             gram_matrix = _fb_hi @ _fb_hi.T
@@ -324,7 +324,7 @@ class DWT_mtap(nn.Module):
             f_idx += 1
         return orthonormal_loss
     
-    def get_fb_hi_orthnorm_loss_v2(self, _nrows_fac=4):
+    def get_fb_hi_orthnorm_loss_v2(self, n_rows=4):
         """
         Pad all filter banks symmetrically to the maximum filter length and stack them together.
         If the total number of filters `nfil` is less than the half maximum filter length `flen_max`,
@@ -335,8 +335,7 @@ class DWT_mtap(nn.Module):
         fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
         fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
         fb_his = torch.cat(fb_his, dim=0)
-        n_rows = (self.flen_max * _nrows_fac).int()
-        n_splits = torch.ceil(fb_his.shape[0]/n_rows).int()
+        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(n_rows)).int()
         for i in range(n_splits):
             _fb_hi_split = fb_his[i::n_splits]
             gram_matrix = _fb_hi_split @ _fb_hi_split.T
@@ -1070,7 +1069,7 @@ class WaveNetXv3(nn.Module):
         # L encoder
         x_L = torch.cat((x_LL, x_HH), dim=1)
         x_L = F.interpolate(x_L, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
-        L_x1 = self.L_dwt_att_actv(self.L_dwt_att_conv(torch.cat((x_main, x_LL), dim=1))) * x_LL
+        # L_x1 = self.L_dwt_att_actv(self.L_dwt_att_conv(torch.cat((x_HH, x_LL), dim=1))) * x_LL
 
         L_x1 = self.L_Conv1(x_L)
         L_x2 = self.L_Maxpool(L_x1)
@@ -1085,7 +1084,7 @@ class WaveNetXv3(nn.Module):
         # H encoder
         x_H = torch.cat((x_LH, x_HL), dim=1)
         x_H = F.interpolate(x_H, size=(x_main.shape[2], x_main.shape[3]), mode='bilinear', align_corners=False)
-        H_x1 = self.H_dwt_att_actv(self.H_dwt_att_conv(torch.cat((x_main, x_LH, x_HL), dim=1))) * x_LH
+        # H_x1 = self.H_dwt_att_actv(self.H_dwt_att_conv(torch.cat((x_LH, x_HL), dim=1))) * x_LH
 
         H_x1 = self.H_Conv1(x_H)
         H_x2 = self.H_Maxpool(H_x1)

@@ -19,7 +19,7 @@ from loss.loss_function import segmentation_loss
 from dataload.dataset_2d import imagefolder_WaveNetX
 from config.visdom_config.visual_visdom import visdom_initialization_WaveNetX, visualization_WaveNetX, visual_image_sup, vis_filter_bank_WaveNetX
 from config.warmup_config.warmup import GradualWarmupScheduler
-from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup
+from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup, save_test_2d, print_test_eval
 from warnings import simplefilter
 from torchsummary import summary
 
@@ -67,8 +67,9 @@ if __name__ == '__main__':
     parser.add_argument('--fbl1', default=1, type=float, help='fb lo orthnorm loss weight')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
-    parser.add_argument('-bts', '--big2small', action='store_true', default=False, help='batch size big to small')
+    parser.add_argument('-b2s', '--big2small', action='store_true', default=False, help='batch size big to small')
     parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
+    parser.add_argument('--threshold', default=0.5, type=float)
 
     args = parser.parse_args()
 
@@ -210,8 +211,8 @@ if __name__ == '__main__':
         fb_l0 = args.fbl0 * 1e-1
         fb_l1 = args.fbl1 * 1e-1
 
-        # fb_l0 *= (0.7+args.gamma) ** (epoch // args.step_size)
-        # fb_l1 *= (1.3+args.gamma) ** (epoch // args.step_size)
+        # fb_l0 *= (args.gamma) ** (epoch // args.step_size)
+        fb_l1 *= (0.3 + args.gamma) ** (epoch // args.step_size)
 
         bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
 
@@ -248,7 +249,7 @@ if __name__ == '__main__':
             loss_train_sup += loss_train_sup2
 
             if args.ver >= 2:
-                loss_train_sup3 = (model1.dwt.get_fb_hi_orthnorm_loss()) * fb_l1 # ADD model1.dwt.get_fb_hi_orthnorm_loss_v2()
+                loss_train_sup3 = fb_l1 * (model1.dwt.get_fb_hi_orthnorm_loss() + model1.dwt.get_fb_hi_orthnorm_loss_v2())
                 train_loss_sup_3 += loss_train_sup3.item()
                 loss_train_sup += loss_train_sup3
 
@@ -330,3 +331,85 @@ if __name__ == '__main__':
     print('-' * print_num)
     print_best_sup(cfg['NUM_CLASSES'], best_val_eval_list, print_num_minus)
     print('=' * print_num)
+
+
+    # Dataset
+    dataset_test = imagefolder_WaveNetX(
+        data_dir=cfg['PATH_DATASET'] + '/test',
+        data_transform_1=data_transforms['test'],
+        data_normalize_1=data_normalize,
+        sup=True,
+        num_images=None
+    )
+
+    dataloaders = {'test': DataLoader(dataset_test, batch_size=32, shuffle=False)}
+
+    # load best model
+    # Load checkpoint
+    # checkpoint = torch.load(args.path_model, map_location=device)
+    # model.load_state_dict(checkpoint, strict=False)
+
+    model = model1
+
+    # Loss function
+    criterion = segmentation_loss(args.loss, False).to(device)
+
+    # # Visualization
+    # if args.vis:
+    #     visdom = visdom_initialization_WaveNetX(env=f'{args.dataset_name}-{network_name}', port=args.visdom_port)
+
+    # Testing
+    model.eval()
+    results_path = os.path.join(cfg['PATH_SEG_RESULT'], args.dataset_name, os.path.splitext(os.path.basename(args.path_model))[0])
+    os.makedirs(results_path, exist_ok=True)
+
+    test_loss_sup_1, test_loss_sup_2, test_loss_sup_3 = 0.0, 0.0, 0.0
+    score_list_test1, mask_list_test, name_list_test = [], [], []
+
+    with torch.no_grad():
+        for i, data in enumerate(dataloaders['test']):
+            print(f"Processing {i + 1} out of {len(dataloaders['test'])}...", end="\r")
+            inputs_test = Variable(data['image'].to(device))
+            mask_test = Variable(data['bin_mask'].to(device).long())
+            name_test = data['ID']
+
+            # Model prediction
+            if args.network.endswith('v0'):
+                outputs_test1, outputs_test2, outputs_test3 = model(inputs_test)
+                test_loss_sup_1 += criterion(outputs_test1, mask_test).item()
+                test_loss_sup_2 += criterion(outputs_test2, mask_test).item()
+                test_loss_sup_3 += criterion(outputs_test3, mask_test).item()
+            else:
+                outputs_test1 = model(inputs_test)
+                test_loss_sup_1 += criterion(outputs_test1, mask_test).item()
+
+            # Gather results
+            if i == 0:
+                score_list_test1 = outputs_test1
+                mask_list_test = mask_test
+                name_list_test = name_test
+            else:
+                score_list_test1 = torch.cat((score_list_test1, outputs_test1), dim=0)
+                mask_list_test = torch.cat((mask_list_test, mask_test), dim=0)
+                name_list_test = np.append(name_list_test, name_test, axis=0)
+
+            save_test_2d(cfg['NUM_CLASSES'], outputs_test1, name_test, args.threshold, results_path, cfg['PALETTE'])
+            # # Visualization of filter banks
+            # if args.vis:
+            #     for f_idx in range(model.dwt.nfil):
+            #         vis_filter_bank_WaveNetX(visdom, fb_2d_list=model.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
+
+        # Calculate testing losses and metrics
+        print_num = 77 + (cfg['NUM_CLASSES'] - 3) * 14
+        print_num_minus = print_num - 2
+        print_num_half = int(print_num / 2 - 1)
+
+        num_batches = {'val': len(dataloaders['test'])}
+        
+        print(test_loss_sup_1,test_loss_sup_2,test_loss_sup_3)
+        test_epoch_loss_sup1 = print_val_loss_WaveNetX(
+            test_loss_sup_1, num_batches, print_num, print_num_minus
+        )
+        test_eval_list, test_m_jc, test_m_dice = print_test_eval(cfg['NUM_CLASSES'], score_list_test1, mask_list_test, print_num)
+
+    print("Testing complete.")
