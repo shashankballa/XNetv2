@@ -171,8 +171,6 @@ class IDWT_1lvl(nn.Module):
 NFLENS = 4
 SYMNFIL = False
 
-# bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 8 -l 2 -e 1000 -s 60  -w 30 --bs_step 90 --max_bs_steps 2 --fbl0 0.1 --fbl1 0.004 --seed 136 --nfil_step 0 --flen_step 4 --nfil 1 --nfil_step 1 --flen 2 -g 0.8
-
 class DWT_mtap(nn.Module):
 
     def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None, 
@@ -327,6 +325,27 @@ class DWT_mtap(nn.Module):
             f_idx += 1
         return orthonormal_loss
     
+    def get_fb_hi_orthnorm_loss_v2(self):
+        """
+        Pad all filter banks symmetrically to the maximum filter length and stack them together.
+        If the total number of filters `nfil` is less than the half maximum filter length `flen_max`,
+        then split filter banks alternately into `nfil/_nrows_dvsr` rows and stack them together.
+        """
+        orth_loss = 0.0
+        fb_his = self.get_fb_hi_list()
+        fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
+        fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
+        fb_his = torch.cat(fb_his, dim=0)
+        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1v2_nrows)).int()
+        for i in range(n_splits):
+            _fb_hi_split = fb_his[i::n_splits]
+            gram_matrix = _fb_hi_split @ _fb_hi_split.T
+            identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
+            _loss = torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
+            orth_loss += _loss
+
+        return orth_loss
+
     def get_fb_hi_orthnorm_loss_v2(self):
         """
         Pad all filter banks symmetrically to the maximum filter length and stack them together.

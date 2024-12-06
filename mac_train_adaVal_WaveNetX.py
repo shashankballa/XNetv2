@@ -32,6 +32,7 @@ def init_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(0)
 
 if __name__ == '__main__':
+    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 4 -l 4 -e 2000 -s 60  -w 10 --bs_step 300 --max_bs_steps 3 --fbl0 0.7 --fbl1 0.7 --seed 1506 --flen_step 4 --nfil 1 --nfil_step 4 --flen 2 -g 0.8 -nfl 5 --symnf
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
@@ -95,14 +96,16 @@ if __name__ == '__main__':
     print_num = 77 + (cfg['NUM_CLASSES'] - 3) * 14
     print_num_minus = print_num - 2
     print_num_half = int(print_num / 2 - 1)
-
-    hyper_params_str = args.network  +  '-l=' + str(args.lr) + \
-            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
-                '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + '-nfl=' + str(args.nflens) + \
-                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
-                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
-                            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + '-fbl1v2_nr=' + str(args.fbl1v2_nr) + '-b2s' * args.big2small \
-                                + '-symnf' * args.symnf
+                
+    model_prm = args.network  + '-nfl=' + str(args.nflens) + '-fl=' + str(args.flen) + '-fls=' + str(args.flen_step) + '-nf=' + str(args.nfil) + '-nfs=' + str(args.nfil_step) + \
+            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + '-fbl1v2_nr=' + str(args.fbl1v2_nr) + '-symnf' * args.symnf
+    
+    train_prm_str = '-l=' + str(args.lr) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-w=' + str(args.warm_up_duration) + \
+            '-e=' + str(args.num_epochs) + '-b=' + str(args.batch_size) + '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + \
+                '-b2s' * args.big2small + '-sd=' + str(args.seed) \
+    
+    hyper_params_str = model_prm + train_prm_str
+                                
 
     # Trained model save
     path_trained_models = cfg['PATH_TRAINED_MODEL'] + '/' + str(dataset_name)
@@ -168,7 +171,7 @@ if __name__ == '__main__':
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
                             nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step, # WaveNetXv2
-                            nflens=args.nflens, ver=args.ver, fbl1v2_nrows=args.fbl1v2_nr
+                            nflens=args.nflens, ver=args.ver, fbl1v2_nrows=args.fbl1v2_nr, symm_nfils=args.symnf
                             ).to(device)
 
     if args.print_net:
