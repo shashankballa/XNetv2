@@ -32,7 +32,7 @@ def init_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(0)
 
 if __name__ == '__main__':
-    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 4 -l 4 -e 2000 -s 60  -w 10 --bs_step 300 --max_bs_steps 3 --fbl0 0.7 --fbl1 0.7 --seed 1506 --flen_step 4 --nfil 1 --nfil_step 4 --flen 2 -g 0.8 -nfl 5 --symnf
+    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 4 -l 4 -e 2000 -s 150  -w 10 --bs_step 300 --max_bs_steps 3 --fbl0 1 --fbl1 1 --seed 1506 --flen_step 4 --nfil 1 --nfil_step 4 --flen 2 -g 0.8 -nfl 5 --symnf -b2s --fbl1v2_nr 12
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
@@ -157,15 +157,18 @@ if __name__ == '__main__':
     print('=' * print_num)
 
     dataloaders = dict()
-    dataloaders['train_sup_0'] = DataLoader(dataset_train_sup, batch_size=args.batch_size, shuffle=True)
-    dataloaders['train_sup_1'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*2, shuffle=True)
-    dataloaders['train_sup_2'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*4, shuffle=True)
-    dataloaders['train_sup_3'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*8, shuffle=True)
+    dataloaders['train_sup_0'] = DataLoader(dataset_train_sup, batch_size=args.batch_size   , shuffle=True)
+    dataloaders['train_sup_1'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*2 , shuffle=True)
+    dataloaders['train_sup_2'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*4 , shuffle=True)
+    dataloaders['train_sup_3'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*8 , shuffle=True)
+    dataloaders['train_sup_4'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*16, shuffle=True)
+    dataloaders['train_sup_5'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*32, shuffle=True)
 
     dataloaders['val'] = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False)#, num_workers=8)
 
     num_batches = {'train_sup_0': len(dataloaders['train_sup_0']), 'train_sup_1': len(dataloaders['train_sup_1']),
                     'train_sup_2': len(dataloaders['train_sup_2']), 'train_sup_3': len(dataloaders['train_sup_3']),
+                    'train_sup_4': len(dataloaders['train_sup_4']), 'train_sup_5': len(dataloaders['train_sup_5']),
                     'val': len(dataloaders['val'])}
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
