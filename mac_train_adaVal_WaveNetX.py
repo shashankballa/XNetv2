@@ -57,19 +57,21 @@ if __name__ == '__main__':
     parser.add_argument('--print_net', action='store_true', default=False, help='print the network or not')
     parser.add_argument('--bs_step_size', default=100, type=int, help='batch size step')
     parser.add_argument('--max_bs_steps', default=3, type=int, help='maximum number of batch size steps')
-    parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
-    parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
-    parser.add_argument('--flen', default=4, type=int, help='filter length in the DWT layer')
-    parser.add_argument('--flen_step', default=4, type=int, help='filter length step size in the DWT layer')
-    parser.add_argument('-l1', '--lambda1', default=0, type=float)
-    parser.add_argument('-l2', '--lambda2', default=0, type=float)
-    parser.add_argument('--fbl0', default=1, type=float, help='fb hi zero mean loss weight')
-    parser.add_argument('--fbl1', default=1, type=float, help='fb lo orthnorm loss weight')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
     parser.add_argument('-b2s', '--big2small', action='store_true', default=False, help='batch size big to small')
     parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
     parser.add_argument('--threshold', default=0.5, type=float)
+
+    parser.add_argument('-nfl', '--nflens', default=4, type=int, help='number of filter lengths')
+    parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
+    parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
+    parser.add_argument('--symnf', action='store_true', default=False, help='use symmetric number of filters in the DWT layer: increase and decrease')
+    parser.add_argument('--flen', default=4, type=int, help='filter length in the DWT layer')
+    parser.add_argument('--flen_step', default=4, type=int, help='filter length step size in the DWT layer')
+    parser.add_argument('--fbl0', default=1, type=float, help='fb hi zero mean loss weight')
+    parser.add_argument('--fbl1', default=1, type=float, help='fb lo orthnorm loss weight')
+    parser.add_argument('--fbl1v2_nr', default=8, type=float, help='Number of rows for fb lo orthnorm loss weight')
 
     args = parser.parse_args()
 
@@ -94,35 +96,29 @@ if __name__ == '__main__':
     print_num_minus = print_num - 2
     print_num_half = int(print_num / 2 - 1)
 
+    hyper_params_str = args.network  +  '-l=' + str(args.lr) + \
+            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
+                '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + '-nfl=' + str(args.nflens) + \
+                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
+                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
+                            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + '-fbl1v2_nr=' + str(args.fbl1v2_nr) + '-b2s' * args.big2small \
+                                + '-symnf' * args.symnf
+
     # Trained model save
     path_trained_models = cfg['PATH_TRAINED_MODEL'] + '/' + str(dataset_name)
     os.makedirs(path_trained_models, exist_ok=True)
-    path_trained_models = path_trained_models + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
-            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
-                '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
-                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
-                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
-                            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
+    path_trained_models = path_trained_models + '/' + hyper_params_str
     os.makedirs(path_trained_models, exist_ok=True)
 
     # Segmentation results save
     path_seg_results = cfg['PATH_SEG_RESULT'] + '/' + str(dataset_name)
     os.makedirs(path_seg_results, exist_ok=True)
-    path_seg_results = path_seg_results + '/' + args.network + '-adaVal' +  '-l=' + str(args.lr) + \
-            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
-                '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
-                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
-                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
-                            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
+    path_seg_results = path_seg_results + '/' + hyper_params_str
     os.makedirs(path_seg_results, exist_ok=True)
 
     # Visualization initialization
     if args.vis:
-        visdom_env = args.network + '-adaVal' + '-l=' + str(args.lr) + \
-            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
-                '-b=' + str(args.batch_size) + '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + \
-                    '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
-                        '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
+        visdom_env = hyper_params_str
         visdom = visdom_initialization_WaveNetX(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
@@ -171,7 +167,8 @@ if __name__ == '__main__':
 
     model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
-                            nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step # WaveNetXv2
+                            nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step, # WaveNetXv2
+                            nflens=args.nflens, ver=args.ver, fbl1v2_nrows=args.fbl1v2_nr
                             ).to(device)
 
     if args.print_net:
@@ -360,8 +357,8 @@ if __name__ == '__main__':
 
     # Testing
     model.eval()
-    results_path = os.path.join(cfg['PATH_SEG_RESULT'], args.dataset_name, os.path.splitext(os.path.basename(args.path_model))[0])
-    os.makedirs(results_path, exist_ok=True)
+    # results_path = os.path.join(cfg['PATH_SEG_RESULT'], args.dataset_name, os.path.splitext(os.path.basename(args.path_model))[0])
+    # os.makedirs(results_path, exist_ok=True)
 
     test_loss_sup_1, test_loss_sup_2, test_loss_sup_3 = 0.0, 0.0, 0.0
     score_list_test1, mask_list_test, name_list_test = [], [], []
@@ -393,7 +390,7 @@ if __name__ == '__main__':
                 mask_list_test = torch.cat((mask_list_test, mask_test), dim=0)
                 name_list_test = np.append(name_list_test, name_test, axis=0)
 
-            save_test_2d(cfg['NUM_CLASSES'], outputs_test1, name_test, args.threshold, results_path, cfg['PALETTE'])
+            # save_test_2d(cfg['NUM_CLASSES'], outputs_test1, name_test, args.threshold, results_path, cfg['PALETTE'])
             # # Visualization of filter banks
             # if args.vis:
             #     for f_idx in range(model.dwt.nfil):

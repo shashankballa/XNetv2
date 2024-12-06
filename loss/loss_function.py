@@ -112,18 +112,18 @@ class DiceLoss(nn.Module):
             loss += self.aux_weight * aux_loss
         return loss
 
-    def forward(self, output, target):
+    def forward(self, predict, target):
         # preds, target = tuple(inputs)
         # inputs = tuple(list(preds) + [target])
         if self.aux:
-            return self._aux_forward(output, target)
+            return self._aux_forward(predict, target)
         else:
             valid_mask = (target != self.ignore_index).long()
             target_one_hot = F.one_hot(torch.clamp_min(target, 0))
-            # print('DiceLossforward|output  : ', output.shape)
+            # print('DiceLossforward|predict : ', predict.shape)
             # print('DiceLossforward|target  : ', target.shape)
             # print('DiceLossforward|tgt_1hot: ', target_one_hot.shape)
-            return self._base_forward(output, target_one_hot, valid_mask)
+            return self._base_forward(predict, target_one_hot, valid_mask)
 
 
 

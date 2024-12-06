@@ -175,7 +175,9 @@ SYMNFIL = False
 
 class DWT_mtap(nn.Module):
 
-    def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None, symm_nfils = SYMNFIL, # Make false for backward compatibility
+    def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None, 
+                 symm_nfils = SYMNFIL, # Make false for backward compatibility
+                 fbl1v2_nrows = 8,
                  pad_mode="replicate"):
         '''
         DWT_mtap: 1-level DWT with multi-tap Quadrature Mirror Filter Banks
@@ -224,6 +226,7 @@ class DWT_mtap(nn.Module):
         _loss_offset = self.flen_max // 2
         self.loss_scales = torch.tensor([(flen + _loss_offset) / (self.flen_max + _loss_offset) for flen in self.flens])
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
+        self.fbl1v2_nrows = fbl1v2_nrows
 
     
     def get_fb_hi_list(self):
@@ -324,7 +327,7 @@ class DWT_mtap(nn.Module):
             f_idx += 1
         return orthonormal_loss
     
-    def get_fb_hi_orthnorm_loss_v2(self, n_rows=4):
+    def get_fb_hi_orthnorm_loss_v2(self):
         """
         Pad all filter banks symmetrically to the maximum filter length and stack them together.
         If the total number of filters `nfil` is less than the half maximum filter length `flen_max`,
@@ -335,7 +338,7 @@ class DWT_mtap(nn.Module):
         fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
         fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
         fb_his = torch.cat(fb_his, dim=0)
-        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(n_rows)).int()
+        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1v2_nrows)).int()
         for i in range(n_splits):
             _fb_hi_split = fb_his[i::n_splits]
             gram_matrix = _fb_hi_split @ _fb_hi_split.T
@@ -782,11 +785,15 @@ class WaveNetXv1(nn.Module):
 
 class WaveNetXv2(nn.Module):
 
-    def __init__(self, in_channels=3, num_classes=1, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS):
+    def __init__(self, in_channels=3, num_classes=1, nflens=NFLENS, flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, 
+                 symm_nfils = SYMNFIL, # Make false for backward compatibility
+                 fbl1v2_nrows = 8,
+                 pad_mode="replicate"):
         super(WaveNetXv2, self).__init__()
 
         # wavelet block
-        self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=NFLENS, inp_channels=in_channels)
+        self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=nflens, inp_channels=in_channels, symm_nfils=symm_nfils,
+                            fbl1v2_nrows=fbl1v2_nrows, pad_mode=pad_mode)
         self.idwt = IDWT_1lvl(out_channels=num_classes)
     
         # main network
@@ -1174,7 +1181,10 @@ class WaveNetXv3(nn.Module):
     
 latest_ver = 2
 
-def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS, symm_nfils=SYMNFIL):
+def wavenetx(in_channels, num_classes, version=latest_ver, nflens=NFLENS, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, 
+             symm_nfils=SYMNFIL,
+             fbl1v2_nrows=8
+             ):
     if version > latest_ver:
         raise ValueError(('WaveNetXv%d model is not available yet') % version)
     if version >= 2:
@@ -1192,7 +1202,8 @@ def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4,
     elif version == 1:
         model = WaveNetXv1(in_channels, num_classes, flen=flen, nfil=nfil)
     elif version == 2:
-        model = WaveNetXv2(in_channels, num_classes, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=nflens)
+        model = WaveNetXv2(in_channels, num_classes, nflens=nflens, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, symm_nfils=symm_nfils, 
+                            fbl1v2_nrows=fbl1v2_nrows)
     init_weights(model, 'kaiming')
     return model
 
