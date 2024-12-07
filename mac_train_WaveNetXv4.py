@@ -17,11 +17,12 @@ from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
 from loss.loss_function import segmentation_loss
 from dataload.dataset_2d import imagefolder_WaveNetX
-from config.visdom_config.visual_visdom import visdom_initialization_WaveNetX, visualization_WaveNetX, visual_image_sup, vis_filter_bank_WaveNetX
+from config.visdom_config.visual_visdom import vis_init_WaveNetX4, vis_WaveNetX4, vis_image_WaveNetX4, vis_filter_bank_WaveNetX
 from config.warmup_config.warmup import GradualWarmupScheduler
-from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, save_val_sup_2d_best_model, draw_pred_sup, print_best_sup, save_test_2d, print_test_eval
+from config.train_test_config.train_test_config import print_train_loss_WaveNetX4, print_val_loss_WaveNetX4, print_train_eval_sup, print_val_scores_WaveNetX4, save_val_sup_2d_best_model, draw_pred_sup_WaveNetX4, print_best_sup, save_test_2d, print_test_eval
 from warnings import simplefilter
 from torchsummary import summary
+import copy
 
 simplefilter(action='ignore', category=FutureWarning)
 
@@ -32,39 +33,38 @@ def init_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(0)
 
 if __name__ == '__main__':
-    
-    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 2 -l 4 -e 2000 -s 100  -w 40 --bs_step 100 --max_bs_steps 4 --fbl0 4 --fbl1 0.7 --seed 1506 --flen_step 2 --nfil 3 --nfil_step 2 --flen 4 -g 0.75 -nfl 7 --symnf -b2s --fbl1v2_nr 16 -ub
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 80 --max_bs_steps 3 --seed 1506 --nfil 2 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 7 --symnf --fbl1v2_nr 8  -ub --fbl0 0.5 --fbl1 0.5
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dataset_name',       default='GLAS', help='CREMI, GlaS, ISIC-2017')
-    parser.add_argument('-b', '--batch_size',   default=4, type=int) #default 16 but my ram can't take it
-    parser.add_argument('-e', '--num_epochs',   default=200, type=int)
-    parser.add_argument('-s', '--step_size',    default=50, type=int)
-    parser.add_argument('-l', '--lr',           default=0.5, type=float)
-    parser.add_argument('-g', '--gamma',        default=0.5, type=float)
-    parser.add_argument('--loss',               default='dice')
-    parser.add_argument('-w', '--warm_up_duration', default=20, type=int)
-    parser.add_argument('--momentum', default=0.9, type=float)
-    parser.add_argument('--wd', default=-5, type=float, help='weight decay pow')
-    parser.add_argument('--wavelet_type', default='haar', help='haar, db2, bior1.5, coif1, dmey')
-    parser.add_argument('--alpha', default=[0, 0.4])
-    parser.add_argument('--beta', default=[0.5, 0.8])
+
     parser.add_argument('-i', '--display_iter', default=1, type=int)
-    parser.add_argument('-n', '--network', default='WaveNetX', type=str)
-    parser.add_argument('--local_rank', default=-1, type=int)
-    parser.add_argument('--rank_index', default=0, help='0, 1, 2, 3')
     parser.add_argument('-v', '--vis', default=True, help='need visualization or not')
     parser.add_argument('--visdom_port', default=16672)
     parser.add_argument('--show_args', default=True, help='show the arguments or not')
     parser.add_argument('--print_net', action='store_true', default=False, help='print the network or not')
+    parser.add_argument('--seed', default=42, type=int)
+    parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
+
+    parser.add_argument('--dataset_name',       default='GLAS', help='CREMI, GlaS, ISIC-2017')
+    parser.add_argument('--loss',               default='dice')
+    parser.add_argument('-e', '--num_epochs',   default=200, type=int)
+    parser.add_argument('-l', '--lr',           default=0.5, type=float)
+    parser.add_argument('-g', '--gamma',        default=0.5, type=float)
+    parser.add_argument('-s', '--step_size',    default=50, type=int)
+    parser.add_argument('-w', '--warm_up_duration', default=20, type=int)
+
+    parser.add_argument('--momentum', default=0.9, type=float)
+    parser.add_argument('--wd', default=-5, type=float, help='weight decay pow')
+
+    parser.add_argument('-b', '--batch_size',   default=4, type=int)
     parser.add_argument('--bs_step_size', default=100, type=int, help='batch size step')
     parser.add_argument('--max_bs_steps', default=3, type=int, help='maximum number of batch size steps')
-    parser.add_argument('--seed', default=42, type=int)
-    parser.add_argument('--ver', default=latest_ver, type=int, help='version of WaveNetX')
     parser.add_argument('-b2s', '--big2small', action='store_true', default=False, help='batch size big to small')
-    parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
-    parser.add_argument('--threshold', default=0.5, type=float)
+
     parser.add_argument('-ub', '--use_best', action='store_true', default=False, help='use best model')
+    # parser.add_argument('--threshold', default=0.5, type=float)
+
     parser.add_argument('-nfl', '--nflens', default=4, type=int, help='number of filter lengths')
     parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
     parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
@@ -77,8 +77,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    args.ver = min(args.ver, latest_ver)
-    args.network = args.network +'v' + str(args.ver)
+    _ver = 4
+    _net = 'WaveNetXv4'
 
     if args.show_args:
         print(args)
@@ -98,7 +98,7 @@ if __name__ == '__main__':
     print_num_minus = print_num - 2
     print_num_half = int(print_num / 2 - 1)
                 
-    model_prm = args.network  + '-nfl=' + str(args.nflens) + '-fl=' + str(args.flen) + '-fls=' + str(args.flen_step) + '-nf=' + str(args.nfil) + '-nfs=' + str(args.nfil_step) + \
+    model_prm = _net  + '-nfl=' + str(args.nflens) + '-fl=' + str(args.flen) + '-fls=' + str(args.flen_step) + '-nf=' + str(args.nfil) + '-nfs=' + str(args.nfil_step) + \
             '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + '-fbl1v2_nr=' + str(args.fbl1v2_nr) + '-symnf' * args.symnf
     
     train_prm_str = '-l=' + str(args.lr) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-w=' + str(args.warm_up_duration) + \
@@ -123,7 +123,7 @@ if __name__ == '__main__':
     # Visualization initialization
     if args.vis:
         visdom_env = hyper_params_str
-        visdom = visdom_initialization_WaveNetX(env=visdom_env, port=args.visdom_port)
+        visdom = vis_init_WaveNetX4(env=visdom_env, port=args.visdom_port)
 
     data_transforms = data_transform_2d(cfg['INPUT_SIZE'])
     data_normalize = data_normalize_2d(cfg['MEAN'], cfg['STD'])
@@ -132,9 +132,6 @@ if __name__ == '__main__':
         data_dir=cfg['PATH_DATASET'] + '/train_sup_100',
         data_transform_1=data_transforms['train'],
         data_normalize_1=data_normalize,
-        wavelet_type=args.wavelet_type,
-        alpha=args.alpha,
-        beta=args.beta,
         sup=True,
         rand_crop=False,
     )
@@ -143,9 +140,6 @@ if __name__ == '__main__':
         data_dir=cfg['PATH_DATASET'] + '/val',
         data_transform_1=data_transforms['val'],
         data_normalize_1=data_normalize,
-        wavelet_type=args.wavelet_type,
-        alpha=[0.2, 0.2],
-        beta=[0.65, 0.65],
         sup=True,
         num_images=None,
         rand_crop=True,
@@ -172,10 +166,10 @@ if __name__ == '__main__':
                     'train_sup_4': len(dataloaders['train_sup_4']), 'train_sup_5': len(dataloaders['train_sup_5']),
                     'val': len(dataloaders['val'])}
 
-    model1 = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
+    model1 = get_network(_net, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
                             nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step, # WaveNetXv2
-                            nflens=args.nflens, ver=args.ver, fbl1_nrows=args.fbl1v2_nr, symm_nfils=args.symnf
+                            nflens=args.nflens, ver=_ver, fbl1_nrows=args.fbl1v2_nr, symm_nfils=args.symnf
                             ).to(device)
 
     if args.print_net:
@@ -191,7 +185,14 @@ if __name__ == '__main__':
     since = time.time()
     count_iter = 0
 
-    best_model = model1
+    best_model_weights = copy.deepcopy(model1.state_dict())
+    best_model = get_network(_net, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
+                            nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
+                            nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step, # WaveNetXv2
+                            nflens=args.nflens, ver=_ver, fbl1_nrows=args.fbl1v2_nr, symm_nfils=args.symnf
+                            ).to(device)
+    best_model.load_state_dict(best_model_weights)
+
     best_result = 'Result1'
     best_val_eval_list = [0 for i in range(4)]
 
@@ -209,7 +210,7 @@ if __name__ == '__main__':
         train_loss = 0.0
 
         val_loss_sup_1 = 0.0
-        val_loss_sup_2 = 0.0
+        val_loss_sup_best = 0.0
         val_loss_sup_3 = 0.0
 
         fb_l0 = args.fbl0 * 1e-1
@@ -237,26 +238,19 @@ if __name__ == '__main__':
             mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
             loss_train_sup1, loss_train_sup2, loss_train_sup3 = 0, 0, 0
 
-            if args.ver == 0:
-                pred_train_sup1, pred_train_sup2, pred_train_sup3 = model1(img_train_sup)
-                loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup) + criterion(pred_train_sup2, mask_train_sup) + criterion(pred_train_sup3, mask_train_sup)
-                train_loss_sup_1 += loss_train_sup1.item()
-                loss_train_sup = loss_train_sup1
-            else:
-                pred_train_sup1 = model1(img_train_sup)
-                loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
-                train_loss_sup_1 += loss_train_sup1.item()
-                loss_train_sup = loss_train_sup1
+
+            pred_train_sup1 = model1(img_train_sup)
+            loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
+            train_loss_sup_1 += loss_train_sup1.item()
+            loss_train_sup = loss_train_sup1
 
             loss_train_sup2 = fb_l0 * model1.dwt.get_fb_hi_orthnorm_loss()
             train_loss_sup_2 += loss_train_sup2.item()
             loss_train_sup += loss_train_sup2
 
-            if args.ver >= 2:
-                loss_train_sup3 = fb_l1 * model1.dwt.get_fb_hh_orthnorm_loss()
-                train_loss_sup_3 += loss_train_sup3.item()
-                loss_train_sup += loss_train_sup3
-
+            loss_train_sup3 = fb_l1 * model1.dwt.get_fb_hh_orthnorm_loss()
+            train_loss_sup_3 += loss_train_sup3.item()
+            loss_train_sup += loss_train_sup3
 
             loss_train_sup.backward()
 
@@ -279,13 +273,14 @@ if __name__ == '__main__':
         if (count_iter % args.display_iter == 0) or args.vis:
             print('=' * print_num)
             print(f'| Epoch {epoch + 1}/{args.num_epochs}'.ljust(print_num_minus, ' '), '|')
-            train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss = print_train_loss_WaveNetX(
+            train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_epoch_loss = print_train_loss_WaveNetX4(
                 train_loss_sup_1, train_loss_sup_2, train_loss_sup_3, train_loss, num_batches, print_num, print_num_minus, num_batches[bs_str])
             train_eval_list1, train_m_jc1, train_m_dc1 = print_train_eval_sup(cfg['NUM_CLASSES'], score_list_train1, mask_list_train, print_num_minus)
         
         # Validation loop
         with torch.no_grad():
             model1.eval()
+            best_model.eval()
             for i, data in enumerate(dataloaders['val']):
 
                 inputs_val1 = Variable(data['image'].to(device))
@@ -294,39 +289,40 @@ if __name__ == '__main__':
 
                 optimizer1.zero_grad()
 
-                if args.ver == 0:
-                    outputs_val1, outputs_val2, outputs_val3 = model1(inputs_val1)
-                    val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
-                    val_loss_sup_2 += criterion(outputs_val2, mask_val).item()
-                    val_loss_sup_3 += criterion(outputs_val3, mask_val).item()
-                else:
-                    outputs_val1 = model1(inputs_val1)
-                    val_loss_sup_1 += criterion(outputs_val1, mask_val).item()
+                pred_val = model1(inputs_val1)
+                val_loss_sup_1 += criterion(pred_val, mask_val).item()
+
+                pred_val_best = best_model(inputs_val1)
+                val_loss_sup_best = criterion(pred_val_best, mask_val).item()
 
                 if i == 0:
-                    score_list_val1 = outputs_val1
+                    score_list_val1 = pred_val
+                    score_list_val_best = pred_val_best
                     mask_list_val = mask_val
                     name_list_val = name_val
                 else:
-                    score_list_val1 = torch.cat((score_list_val1, outputs_val1), dim=0)
+                    score_list_val1 = torch.cat((score_list_val1, pred_val), dim=0)
+                    score_list_val_best = torch.cat((score_list_val_best, pred_val_best), dim=0)
                     mask_list_val = torch.cat((mask_list_val, mask_val), dim=0)
                     name_list_val = np.append(name_list_val, name_val, axis=0)
 
-            val_epoch_loss_sup1 = print_val_loss_WaveNetX(val_loss_sup_1, num_batches, print_num, print_num_minus)
-            val_eval_list1, val_m_jc1, val_m_dc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
+            val_epoch_loss_sup1, val_epoch_loss_sup_best = print_val_loss_WaveNetX4(val_loss_sup_1, val_loss_sup_best, num_batches, print_num, print_num_minus)
+            val_eval_list1, val_eval_list_best, val_m_jc1, val_m_dc1, best_jc, best_dc = print_val_scores_WaveNetX4(cfg['NUM_CLASSES'], score_list_val1, score_list_val_best,
+                                                                                                mask_list_val, print_num_minus)
 
+            best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
+                                                    path_trained_models, path_seg_results, cfg['PALETTE'], hyper_params_str)
+            
             if args.use_best:
-                best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
-                                                      path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
-                model1 = best_model
-            else:
-                best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, 
-                                                      path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
-            if args.vis:                
-                draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)
-                visualization_WaveNetX(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, 
-                                       train_m_jc1, train_m_dc1, val_epoch_loss_sup1, val_m_jc1, val_m_dc1)
-                visual_image_sup(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3])
+                model1.load_state_dict(copy.deepcopy(best_model.state_dict()))
+            
+            if args.vis:
+
+                vis_WaveNetX4(visdom, epoch + 1, train_epoch_loss, train_epoch_loss_sup1, train_epoch_loss_sup2, train_epoch_loss_sup3, train_m_jc1, train_m_dc1, 
+                              val_epoch_loss_sup1, val_m_jc1, val_m_dc1, val_epoch_loss_sup_best, best_jc, best_dc)
+                
+                draw_img = draw_pred_sup_WaveNetX4(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, pred_val, pred_val_best, train_eval_list1, val_eval_list1, val_eval_list_best)
+                vis_image_WaveNetX4(visdom, draw_img[0], draw_img[1], draw_img[2], draw_img[3], draw_img[4], stich_img=False)
                 for f_idx in range(model1.dwt.nfil):
                     vis_filter_bank_WaveNetX(visdom, fb_2d_list=model1.dwt.get_fb_2d_list(for_vis=True), fil_idx=f_idx, figure_name='2D Filter #{}'.format(f_idx))
             print('-' * print_num)
@@ -384,7 +380,7 @@ if __name__ == '__main__':
             name_test = data['ID']
 
             # Model prediction
-            if args.network.endswith('v0'):
+            if _net.endswith('v0'):
                 outputs_test1, outputs_test2, outputs_test3 = model(inputs_test)
                 test_loss_sup_1 += criterion(outputs_test1, mask_test).item()
                 test_loss_sup_2 += criterion(outputs_test2, mask_test).item()
@@ -417,8 +413,8 @@ if __name__ == '__main__':
         num_batches = {'val': len(dataloaders['test'])}
         
         print(test_loss_sup_1,test_loss_sup_2,test_loss_sup_3)
-        test_epoch_loss_sup1 = print_val_loss_WaveNetX(
-            test_loss_sup_1, num_batches, print_num, print_num_minus
+        test_epoch_loss_sup1 = print_val_loss_WaveNetX4(
+            test_loss_sup_1, test_loss_sup_1, num_batches, print_num, print_num_minus
         )
         test_eval_list, test_m_jc, test_m_dice = print_test_eval(cfg['NUM_CLASSES'], score_list_test1, mask_list_test, print_num)
 

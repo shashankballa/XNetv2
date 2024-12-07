@@ -176,7 +176,7 @@ class DWT_mtap(nn.Module):
 
     def __init__(self, nflens=NFLENS , flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, inp_channels = None, 
                  symm_nfils = SYMNFIL, # Make false for backward compatibility
-                 fbl1v2_nrows = 8,
+                 fbl1_nrows = 8,
                  pad_mode="replicate"):
         '''
         DWT_mtap: 1-level DWT with multi-tap Quadrature Mirror Filter Banks
@@ -225,7 +225,7 @@ class DWT_mtap(nn.Module):
         _loss_offset = self.flen_max // 2
         self.loss_scales = torch.tensor([(self.nfils[i]*self.flens[i]**2 + _loss_offset) for i in range(self.nflens)], dtype=torch.float32) 
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
-        self.fbl1v2_nrows = fbl1v2_nrows
+        self.fbl1_nrows = fbl1_nrows
 
     
     def get_fb_hi_list(self):
@@ -340,7 +340,7 @@ class DWT_mtap(nn.Module):
         fb_his = [fb_hi - fb_hi.mean(dim=-1, keepdim=True) for fb_hi in fb_his]
         fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
         fb_his = torch.cat(fb_his, dim=0)
-        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1v2_nrows)).int()
+        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1_nrows)).int()
         for i in range(n_splits):
             _fb_hi_split = fb_his[i::n_splits]
             gram_matrix = _fb_hi_split @ _fb_hi_split.T
@@ -360,21 +360,21 @@ class DWT_mtap(nn.Module):
         fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
         fb_his = [fb_hi - fb_hi.mean(dim=-1, keepdim=True) for fb_hi in fb_his]
         nfils = [fb_hi.shape[0] for fb_hi in fb_his]
-        fb_hh_flats = torch.tensor([])
+        fb_hh_flats = torch.tensor([]).to(fb_his[0].device)
         for i in range(len(fb_his)):
             fb_hi = fb_his[i]
             fb_lo = fb_hi.flip(-1)
             fb_lo[:, ::2] *= -1
             fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
             fb_hh = F.pad(fb_hh, [(self.flen_max - fb_hi.shape[1]) // 2] * 4, mode='constant', value=0)
-            print("outer product shape: ", fb_hh.shape)
+            # print("outer product shape: ", fb_hh.shape)
             fb_hh_flat = fb_hh.reshape(nfils[i], -1)
-            fb_hh_flats.append(fb_hh_flat)
-            
-        fb_hh_flats = torch.tensor(fb_hh_flats)
-        n_splits = torch.ceil(len(fb_hh_flats)/torch.tensor(self.fbl1v2_nrows)).int()
+            fb_hh_flats = torch.cat((fb_hh_flats, fb_hh_flat), dim=0)
+
+        n_splits = torch.ceil(len(fb_hh_flats)/torch.tensor(self.fbl1_nrows)).int()
         for i in range(n_splits):
             _fb_hh_split = fb_hh_flats[i::n_splits]
+            # print("_fb_hh_split shape: ", _fb_hh_split.shape)
             gram_matrix = _fb_hh_split @ _fb_hh_split.T
             identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
             _loss = torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
@@ -820,13 +820,13 @@ class WaveNetXv2(nn.Module):
 
     def __init__(self, in_channels=3, num_classes=1, nflens=NFLENS, flen_start = 4, nfil_start = 4, flen_step = 4, nfil_step = 4, 
                  symm_nfils = SYMNFIL, # Make false for backward compatibility
-                 fbl1v2_nrows = 8,
+                 fbl1_nrows = 8,
                  pad_mode="replicate"):
         super(WaveNetXv2, self).__init__()
 
         # wavelet block
         self.dwt = DWT_mtap(flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=nflens, inp_channels=in_channels, symm_nfils=symm_nfils,
-                            fbl1v2_nrows=fbl1v2_nrows, pad_mode=pad_mode)
+                            fbl1_nrows=fbl1_nrows, pad_mode=pad_mode)
         self.idwt = IDWT_1lvl(out_channels=num_classes)
     
         # main network
@@ -1216,7 +1216,7 @@ latest_ver = 2
 
 def wavenetx(in_channels, num_classes, version=latest_ver, nflens=NFLENS, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, 
              symm_nfils=SYMNFIL,
-             fbl1v2_nrows=8
+             fbl1_nrows=8
              ):
     if version > latest_ver:
         raise ValueError(('WaveNetXv%d model is not available yet') % version)
@@ -1236,7 +1236,7 @@ def wavenetx(in_channels, num_classes, version=latest_ver, nflens=NFLENS, flen=8
         model = WaveNetXv1(in_channels, num_classes, flen=flen, nfil=nfil)
     elif version == 2:
         model = WaveNetXv2(in_channels, num_classes, nflens=nflens, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, symm_nfils=symm_nfils, 
-                            fbl1v2_nrows=fbl1v2_nrows)
+                            fbl1_nrows=fbl1_nrows)
     init_weights(model, 'kaiming')
     return model
 
