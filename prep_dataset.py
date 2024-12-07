@@ -105,7 +105,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "dataset_name",
         type=str,
-        help="Name of the dataset folder to process (e.g., GLas)."
+        help="Name of the dataset folder to process (e.g., GLaS)."
     )
     args = parser.parse_args()
 

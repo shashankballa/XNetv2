@@ -34,7 +34,7 @@ def init_seeds(seed):
 
 if __name__ == '__main__':
 
-    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 80 --max_bs_steps 3 --seed 1506 --nfil 2 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 7 --symnf --fbl1v2_nr 8  -ub --fbl0 0.5 --fbl1 0.5
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 50 --max_bs_steps 3 --seed 1506 --nfil 1 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 7 --symnf --fbl1v2_nr 8  --fbl0 1.5 --fbl1 1.5 -ub
 
     parser = argparse.ArgumentParser()
 
@@ -153,18 +153,32 @@ if __name__ == '__main__':
 
     dataloaders = dict()
     dataloaders['train_sup_0'] = DataLoader(dataset_train_sup, batch_size=args.batch_size   , shuffle=True)
-    dataloaders['train_sup_1'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*2 , shuffle=True)
-    dataloaders['train_sup_2'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*4 , shuffle=True)
-    dataloaders['train_sup_3'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*8 , shuffle=True)
-    dataloaders['train_sup_4'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*16, shuffle=True)
-    dataloaders['train_sup_5'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*32, shuffle=True)
+    if args.max_bs_steps > 0:
+        dataloaders['train_sup_1'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*2 , shuffle=True)
+        if args.max_bs_steps > 1:
+            dataloaders['train_sup_2'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*4 , shuffle=True)
+            if args.max_bs_steps > 2:
+                dataloaders['train_sup_3'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*8 , shuffle=True)
+                if args.max_bs_steps > 3:
+                    dataloaders['train_sup_4'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*16, shuffle=True)
+                    if args.max_bs_steps > 4:
+                        dataloaders['train_sup_5'] = DataLoader(dataset_train_sup, batch_size=args.batch_size*32, shuffle=True)
+                        if args.max_bs_steps > 5:
+                            raise ValueError('Maximum number of batch size steps is 5')
 
     dataloaders['val'] = DataLoader(dataset_val, batch_size=args.batch_size, shuffle=False)#, num_workers=8)
 
-    num_batches = {'train_sup_0': len(dataloaders['train_sup_0']), 'train_sup_1': len(dataloaders['train_sup_1']),
-                    'train_sup_2': len(dataloaders['train_sup_2']), 'train_sup_3': len(dataloaders['train_sup_3']),
-                    'train_sup_4': len(dataloaders['train_sup_4']), 'train_sup_5': len(dataloaders['train_sup_5']),
-                    'val': len(dataloaders['val'])}
+    num_batches = {'train_sup_0': len(dataloaders['train_sup_0']), 'val': len(dataloaders['val'])}
+    if args.max_bs_steps > 0:
+        num_batches['train_sup_1'] = len(dataloaders['train_sup_1'])
+        if args.max_bs_steps > 1:
+            num_batches['train_sup_2'] = len(dataloaders['train_sup_2'])
+            if args.max_bs_steps > 2:
+                num_batches['train_sup_3'] = len(dataloaders['train_sup_3'])
+                if args.max_bs_steps > 3:
+                    num_batches['train_sup_4'] = len(dataloaders['train_sup_4'])
+                    if args.max_bs_steps > 4:
+                        num_batches['train_sup_5'] = len(dataloaders['train_sup_5'])
 
     model1 = get_network(_net, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
                             nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
@@ -174,16 +188,6 @@ if __name__ == '__main__':
 
     if args.print_net:
         summary(model1.cpu(), input_size=(cfg['IN_CHANNELS'], cfg['INPUT_SIZE'][0], cfg['INPUT_SIZE'][1]))
-
-    criterion = segmentation_loss(args.loss, False).to(device)
-
-    optimizer1 = optim.SGD(model1.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5 * 10 ** args.wd)
-    exp_lr_scheduler1 = lr_scheduler.StepLR(optimizer1, step_size=args.step_size, gamma=args.gamma)
-    scheduler_warmup1 = GradualWarmupScheduler(optimizer1, multiplier=1.0, total_epoch=args.warm_up_duration, 
-                                               after_scheduler=exp_lr_scheduler1)
-
-    since = time.time()
-    count_iter = 0
 
     best_model_weights = copy.deepcopy(model1.state_dict())
     best_model = get_network(_net, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
@@ -195,6 +199,16 @@ if __name__ == '__main__':
 
     best_result = 'Result1'
     best_val_eval_list = [0 for i in range(4)]
+
+    criterion = segmentation_loss(args.loss, False).to(device)
+
+    optimizer1 = optim.SGD(model1.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=5 * 10 ** args.wd)
+    exp_lr_scheduler1 = lr_scheduler.StepLR(optimizer1, step_size=args.step_size, gamma=args.gamma)
+    scheduler_warmup1 = GradualWarmupScheduler(optimizer1, multiplier=1.0, total_epoch=args.warm_up_duration, 
+                                               after_scheduler=exp_lr_scheduler1)
+
+    since = time.time()
+    count_iter = 0
 
     for epoch in range(args.num_epochs):
 
@@ -219,7 +233,7 @@ if __name__ == '__main__':
         # fb_l0 *= (args.gamma) ** (epoch // args.step_size)
         # fb_l1 *= (0.3 + args.gamma) ** (epoch // args.step_size)
 
-        bs_idx = epoch // args.bs_step_size % args.max_bs_steps
+        bs_idx = epoch // args.bs_step_size % (args.max_bs_steps + 1) # 0, 1, ..., max_bs_steps
 
         if args.big2small:
             bs_idx = args.max_bs_steps - bs_idx
@@ -313,7 +327,8 @@ if __name__ == '__main__':
             best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
                                                     path_trained_models, path_seg_results, cfg['PALETTE'], hyper_params_str)
             
-            if args.use_best:
+            if args.use_best and (bs_idx == args.max_bs_steps - 1):
+                print('| Using best model...'.ljust(print_num_minus, ' '), '|')
                 model1.load_state_dict(copy.deepcopy(best_model.state_dict()))
             
             if args.vis:
@@ -355,7 +370,7 @@ if __name__ == '__main__':
     # checkpoint = torch.load(args.path_model, map_location=device)
     # model.load_state_dict(checkpoint, strict=False)
 
-    model = model1
+    model = best_model
 
     # Loss function
     criterion = segmentation_loss(args.loss, False).to(device)
