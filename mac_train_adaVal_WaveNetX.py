@@ -19,7 +19,7 @@ from loss.loss_function import segmentation_loss
 from dataload.dataset_2d import imagefolder_WaveNetX
 from config.visdom_config.visual_visdom import visdom_initialization_WaveNetX, visualization_WaveNetX, visual_image_sup, vis_filter_bank_WaveNetX
 from config.warmup_config.warmup import GradualWarmupScheduler
-from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, draw_pred_sup, print_best_sup, save_test_2d, print_test_eval
+from config.train_test_config.train_test_config import print_train_loss_WaveNetX, print_val_loss_WaveNetX, print_train_eval_sup, print_val_eval_sup, save_val_best_sup_2d, save_val_sup_2d_best_model, draw_pred_sup, print_best_sup, save_test_2d, print_test_eval
 from warnings import simplefilter
 from torchsummary import summary
 
@@ -32,7 +32,7 @@ def init_seeds(seed):
     os.environ['PYTHONHASHSEED'] = str(0)
 
 if __name__ == '__main__':
-    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 4 -l 4 -e 2000 -s 150  -w 10 --bs_step 300 --max_bs_steps 3 --fbl0 1 --fbl1 1 --seed 1506 --flen_step 4 --nfil 1 --nfil_step 4 --flen 2 -g 0.8 -nfl 5 --symnf -b2s --fbl1v2_nr 12
+    # bash scripts/run_py.sh mac_train_adaVal_WaveNetX.py -b 1 -l 4 -e 2000 -s 150  -w 10 --bs_step 200 --max_bs_steps 5 --fbl0 4 --fbl1 0. --seed 1506 --flen_step 2 --nfil 1 --nfil_step 2 --flen 2 -g 0.75 -nfl 8 --symnf -b2s --fbl1v2_nr 16
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', default='GLAS', help='CREMI, GlaS, ISIC-2017')
@@ -63,7 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('-b2s', '--big2small', action='store_true', default=False, help='batch size big to small')
     parser.add_argument('--use_cpu', action='store_true', default=False, help='use cpu')
     parser.add_argument('--threshold', default=0.5, type=float)
-
+    parser.add_argument('-ub', '--use_best', action='store_true', default=False, help='use best model')
     parser.add_argument('-nfl', '--nflens', default=4, type=int, help='number of filter lengths')
     parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
     parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
@@ -102,7 +102,7 @@ if __name__ == '__main__':
     
     train_prm_str = '-l=' + str(args.lr) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-w=' + str(args.warm_up_duration) + \
             '-e=' + str(args.num_epochs) + '-b=' + str(args.batch_size) + '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + \
-                '-b2s' * args.big2small + '-sd=' + str(args.seed) \
+                '-b2s' * args.big2small + '-ub' * args.use_best + '-sd=' + str(args.seed) \
     
     hyper_params_str = model_prm + train_prm_str
                                 
@@ -217,7 +217,7 @@ if __name__ == '__main__':
         # fb_l0 *= (args.gamma) ** (epoch // args.step_size)
         fb_l1 *= (0.3 + args.gamma) ** (epoch // args.step_size)
 
-        bs_idx = min(epoch // args.bs_step_size, args.max_bs_steps)
+        bs_idx = epoch // args.bs_step_size % args.max_bs_steps
 
         if args.big2small:
             bs_idx = args.max_bs_steps - bs_idx
@@ -313,7 +313,13 @@ if __name__ == '__main__':
 
             val_epoch_loss_sup1 = print_val_loss_WaveNetX(val_loss_sup_1, num_batches, print_num, print_num_minus)
             val_eval_list1, val_m_jc1, val_m_dc1 = print_val_eval_sup(cfg['NUM_CLASSES'], score_list_val1, mask_list_val, print_num_minus)
-            best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, 
+
+            if args.use_best:
+                best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
+                                                      path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
+                model1 = best_model
+            else:
+                best_val_eval_list = save_val_best_sup_2d(cfg['NUM_CLASSES'], best_val_eval_list, model1, score_list_val1, name_list_val, val_eval_list1, 
                                                       path_trained_models, path_seg_results, cfg['PALETTE'], args.network)
             if args.vis:                
                 draw_img = draw_pred_sup(cfg['NUM_CLASSES'], mask_train_sup, mask_val, pred_train_sup1, outputs_val1, train_eval_list1, val_eval_list1)

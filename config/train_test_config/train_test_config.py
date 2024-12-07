@@ -135,6 +135,101 @@ def save_val_best_sup_2d(num_classes, best_list, model, score_list_val, name_lis
 
     return best_list
 
+def save_val_sup_2d_best_model(num_classes, best_list, model, best_model, score_list_val, name_list_val, eval_list, 
+                               path_trained_model, path_seg_results, palette, model_name):
+    """
+    Save the best model based on the evaluation metrics and also save the segmentation predictions.
+
+    Parameters:
+    -----------
+    num_classes : int
+        Number of classes in the segmentation task.
+    best_list : list
+        A list containing the current best metrics. Typically best_list = [best_threshold, best_Jc, best_Dc, ...].
+    model : torch.nn.Module
+        The current model being evaluated.
+    best_model : torch.nn.Module
+        The currently stored best model.
+    score_list_val : torch.Tensor
+        The model output scores for the validation set (e.g., shape: [N, C, H, W]).
+    name_list_val : list of str
+        The list of image names corresponding to `score_list_val`.
+    eval_list : list
+        A list containing the new evaluation metrics (e.g., [threshold, Jaccard, Dice]).
+    path_trained_model : str
+        Directory path to save the model checkpoints.
+    path_seg_results : str
+        Directory path to save the segmentation results.
+    palette : list
+        A list representing the color palette for segmentation visualization.
+    model_name : str
+        A unique name/identifier for the model.
+    """
+
+    def save_results(pred_results, name_list, palette, save_path):
+        """
+        Save predicted segmentation maps with color palettes applied.
+        """
+        assert len(name_list) == pred_results.shape[0], "Mismatch in number of results and names."
+        for i in range(len(name_list)):
+            # Create a paletted image
+            color_image = Image.fromarray(pred_results[i].astype(np.uint8), mode='P')
+            color_image.putpalette(palette)
+            color_image.save(os.path.join(save_path, name_list[i]))
+
+    # Compare the current metrics (eval_list) with the stored best metrics (best_list)
+    # Typically:
+    #   best_list[0]: best threshold
+    #   best_list[1]: best Jaccard Coefficient (Jc)
+    #   best_list[2]: best Dice Coefficient (Dc)
+    #   eval_list[0]: current threshold
+    #   eval_list[1]: current Jaccard Coefficient
+    #   eval_list[2]: current Dice Coefficient
+
+    # Check if the new Jaccard Coefficient is better
+    if best_list[1] < eval_list[1]:
+        # Update best Jaccard
+        best_list[1] = eval_list[1]
+
+        # Save the best model based on Jaccard
+        torch.save(model.state_dict(), os.path.join(path_trained_model, f'best_{model_name}_Jc_{best_list[1]:.4f}.pth'))
+
+        # Compute predictions
+        if num_classes == 2:
+            # For binary segmentation, apply softmax and threshold
+            score_list_val = torch.softmax(score_list_val, dim=1)
+            pred_results = score_list_val[:, 1, :, :].cpu().numpy()
+            pred_results = (pred_results > eval_list[0]).astype(np.uint8)
+        else:
+            # For multi-class segmentation, take the argmax
+            pred_results = torch.argmax(score_list_val, dim=1).cpu().numpy()
+
+        # Save the segmentation predictions
+        save_results(pred_results, name_list_val, palette, path_seg_results)
+        best_model = model
+
+    # If not improved on Jaccard, check Dice
+    elif best_list[2] < eval_list[2]:
+        # Update best Dice
+        best_list[2] = eval_list[2]
+
+        # Save the best model based on Dice
+        torch.save(model.state_dict(), os.path.join(path_trained_model, f'best_{model_name}_Dc_{best_list[2]:.4f}.pth'))
+
+        # Compute predictions
+        if num_classes == 2:
+            score_list_val = torch.softmax(score_list_val, dim=1)
+            pred_results = score_list_val[:, 1, :, :].cpu().numpy()
+            pred_results = (pred_results > eval_list[0]).astype(np.uint8)
+        else:
+            pred_results = torch.argmax(score_list_val, dim=1).cpu().numpy()
+
+        # Save segmentation predictions
+        save_results(pred_results, name_list_val, palette, path_seg_results)
+        best_model = model
+
+    return best_list, best_model
+
 def save_val_best_sup_3d(best_list, model, eval_list, path_trained_model, model_name):
 
     if best_list[1] < eval_list[1]:

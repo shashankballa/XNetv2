@@ -63,9 +63,9 @@ class DWT_1lvl(nn.Module):
         if inp_channels is None:
             inp_channels = self.inp_channels
         fb_hi = F.normalize(self.fb_hi, p=2, dim=-1)
+        fb_hi = fb_hi - fb_hi.mean(dim=-1, keepdim=True)
         fb_lo = fb_hi.flip(-1)
         fb_lo[:, ::2] *= -1
-        # fb_lo -= fb_lo.mean(dim=-1, keepdim=True)
         fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
         fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
         fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
@@ -114,21 +114,22 @@ class IDWT_1lvl(nn.Module):
         for _fb_hi in dwt_fb_his:
             _nfil, _flen = _fb_hi.shape
             fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            fb_hi = fb_hi - fb_hi.mean(dim=-1, keepdim=True)
             # Generate high-pass filters by flipping and changing signs
             fb_lo = fb_hi.flip(-1)
             fb_lo[:, ::2] *= -1
             fb_hi = fb_hi.flip(-1) # flip the Synthesis filters
             fb_lo = fb_lo.flip(-1)
             flip_dims = (-1, -2)
-            _fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
-            _fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
+            _fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo).flip(dims=flip_dims).view(_nfil, 1, _flen, _flen).repeat(out_channels, 1, 1, 1)
             pads = [(max_flen - _fb_hi.shape[1]) // 2] * 4
-            fb_ll.append(F.pad(_fb_ll, pads, mode='constant', value=0))
-            fb_lh.append(F.pad(_fb_lh, pads, mode='constant', value=0))
-            fb_hl.append(F.pad(_fb_hl, pads, mode='constant', value=0))
-            fb_hh.append(F.pad(_fb_hh, pads, mode='constant', value=0))
+            fb_ll.append(F.pad(_fb_hh, pads, mode='constant', value=0))
+            fb_lh.append(F.pad(_fb_hl, pads, mode='constant', value=0))
+            fb_hl.append(F.pad(_fb_lh, pads, mode='constant', value=0))
+            fb_hh.append(F.pad(_fb_ll, pads, mode='constant', value=0))
 
         fb_ll = torch.cat(fb_ll, dim=0)
         fb_lh = torch.cat(fb_lh, dim=0)
@@ -222,7 +223,7 @@ class DWT_mtap(nn.Module):
 
         # add scales for losses based on filter lengths: larger flen -> higher loss scale
         _loss_offset = self.flen_max // 2
-        self.loss_scales = torch.tensor([(flen + _loss_offset) / (self.flen_max + _loss_offset) for flen in self.flens])
+        self.loss_scales = torch.tensor([(self.nfils[i]*self.flens[i]**2 + _loss_offset) for i in range(self.nflens)], dtype=torch.float32) 
         self.loss_scales = self.loss_scales / torch.sum(self.loss_scales)
         self.fbl1v2_nrows = fbl1v2_nrows
 
@@ -249,41 +250,41 @@ class DWT_mtap(nn.Module):
         for _fb_hi in self.get_fb_hi_list():
             _nfil, _flen = _fb_hi.shape
             fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            fb_hi = fb_hi - fb_hi.mean(dim=-1, keepdim=True)
             fb_lo = fb_hi.flip(-1)
             fb_lo[:, ::2] *= -1
-            # fb_lo -= fb_lo.mean(dim=-1, keepdim=True)
-            _fb_ll = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
-            _fb_lh = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
-            _fb_hl = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
-            _fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
+            _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
+            _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
+            _fb_lh = torch.einsum('nf,ng->nfg', fb_hi, fb_lo)
+            _fb_ll = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
 
             _padval = 0
             if not for_vis:
-                _fb_ll = _fb_ll.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
-                _fb_lh = _fb_lh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
-                _fb_hl = _fb_hl.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_hh = _fb_hh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
+                _fb_hl = _fb_hl.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
+                _fb_lh = _fb_lh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
+                _fb_ll = _fb_ll.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
             else:
                 # map tp [0, 1] for visualization
-                _max = torch.max(torch.tensor([_fb_ll.max(), _fb_lh.max(), _fb_hl.max(), _fb_hh.max()]))
-                _min = torch.min(torch.tensor([_fb_ll.min(), _fb_lh.min(), _fb_hl.min(), _fb_hh.min()]))
+                _max = torch.max(torch.tensor([_fb_hh.max(), _fb_hl.max(), _fb_lh.max(), _fb_ll.max()]))
+                _min = torch.min(torch.tensor([_fb_hh.min(), _fb_hl.min(), _fb_lh.min(), _fb_ll.min()]))
                 _maxx = torch.max(torch.tensor([_max.abs(), _min.abs()]))
-                _fb_ll = (_fb_ll/_maxx + 1) / 2
-                _fb_lh = (_fb_lh/_maxx + 1) / 2
-                _fb_hl = (_fb_hl/_maxx + 1) / 2
                 _fb_hh = (_fb_hh/_maxx + 1) / 2
+                _fb_hl = (_fb_hl/_maxx + 1) / 2
+                _fb_lh = (_fb_lh/_maxx + 1) / 2
+                _fb_ll = (_fb_ll/_maxx + 1) / 2
                 _padval = 0.5
 
             pads = [(self.flen_max - _fb_hi.shape[1]) // 2] * 4
-            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=_padval)
-            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=_padval)
-            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=_padval)
             _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=_padval)
+            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=_padval)
+            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=_padval)
+            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=_padval)
 
-            fb_ll.append(_fb_ll)
-            fb_lh.append(_fb_lh)
-            fb_hl.append(_fb_hl)
-            fb_hh.append(_fb_hh)
+            fb_ll.append(_fb_hh)
+            fb_lh.append(_fb_hl)
+            fb_hl.append(_fb_lh)
+            fb_hh.append(_fb_ll)
         
         fb_ll = torch.cat(fb_ll, dim=0)
         fb_lh = torch.cat(fb_lh, dim=0)
@@ -297,6 +298,7 @@ class DWT_mtap(nn.Module):
         f_idx = 0
         for _fb_hi in self.get_fb_hi_list():
             fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            fb_hi = fb_hi - fb_hi.mean(dim=-1, keepdim=True)
             fb_hi_loss += fb_hi.sum(dim=-1).abs().sum() * self.loss_scales[f_idx]
             f_idx += 1
         return fb_hi_loss
@@ -314,6 +316,7 @@ class DWT_mtap(nn.Module):
         for _fb_hi in self.get_fb_hi_list():
             # Normalize the filter bank rows
             _fb_hi = F.normalize(_fb_hi, p=2, dim=-1)
+            _fb_hi = _fb_hi - _fb_hi.mean(dim=-1, keepdim=True)
 
             # Compute Gram matrix: G = W * W^T
             gram_matrix = _fb_hi @ _fb_hi.T
@@ -324,7 +327,7 @@ class DWT_mtap(nn.Module):
             orthonormal_loss += _loss * self.loss_scales[f_idx]
             f_idx += 1
         return orthonormal_loss
-    
+
     def get_fb_hi_orthnorm_loss_v2(self):
         """
         Pad all filter banks symmetrically to the maximum filter length and stack them together.
@@ -334,6 +337,7 @@ class DWT_mtap(nn.Module):
         orth_loss = 0.0
         fb_his = self.get_fb_hi_list()
         fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
+        fb_his = [fb_hi - fb_hi.mean(dim=-1, keepdim=True) for fb_hi in fb_his]
         fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
         fb_his = torch.cat(fb_his, dim=0)
         n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1v2_nrows)).int()
@@ -346,25 +350,35 @@ class DWT_mtap(nn.Module):
 
         return orth_loss
 
-    def get_fb_hi_orthnorm_loss_v2(self):
+    def get_fb_hh_orthnorm_loss(self):
         """
-        Pad all filter banks symmetrically to the maximum filter length and stack them together.
-        If the total number of filters `nfil` is less than the half maximum filter length `flen_max`,
-        then split filter banks alternately into `nfil/_nrows_dvsr` rows and stack them together.
+        Compute outer product of the high-pass filter banks and pad them symmetrically to the maximum filter length.
+        flatten the filter banks and compute the Gram matrix.
         """
         orth_loss = 0.0
         fb_his = self.get_fb_hi_list()
         fb_his = [F.normalize(fb_hi, p=2, dim=-1) for fb_hi in fb_his]
-        fb_his = [F.pad(fb_hi, (self.flen_max - fb_hi.shape[1] // 2, self.flen_max - fb_hi.shape[1] // 2), mode='constant', value=0) for fb_hi in fb_his]
-        fb_his = torch.cat(fb_his, dim=0)
-        n_splits = torch.ceil(fb_his.shape[0]/torch.tensor(self.fbl1v2_nrows)).int()
+        fb_his = [fb_hi - fb_hi.mean(dim=-1, keepdim=True) for fb_hi in fb_his]
+        nfils = [fb_hi.shape[0] for fb_hi in fb_his]
+        fb_hh_flats = torch.tensor([])
+        for i in range(len(fb_his)):
+            fb_hi = fb_his[i]
+            fb_lo = fb_hi.flip(-1)
+            fb_lo[:, ::2] *= -1
+            fb_hh = torch.einsum('nf,ng->nfg', fb_lo, fb_lo)
+            fb_hh = F.pad(fb_hh, [(self.flen_max - fb_hi.shape[1]) // 2] * 4, mode='constant', value=0)
+            print("outer product shape: ", fb_hh.shape)
+            fb_hh_flat = fb_hh.reshape(nfils[i], -1)
+            fb_hh_flats.append(fb_hh_flat)
+            
+        fb_hh_flats = torch.tensor(fb_hh_flats)
+        n_splits = torch.ceil(len(fb_hh_flats)/torch.tensor(self.fbl1v2_nrows)).int()
         for i in range(n_splits):
-            _fb_hi_split = fb_his[i::n_splits]
-            gram_matrix = _fb_hi_split @ _fb_hi_split.T
+            _fb_hh_split = fb_hh_flats[i::n_splits]
+            gram_matrix = _fb_hh_split @ _fb_hh_split.T
             identity = torch.eye(gram_matrix.size(0), device=gram_matrix.device)
             _loss = torch.linalg.norm(gram_matrix - identity, ord='fro') ** 2
             orth_loss += _loss
-
         return orth_loss
     
     def forward(self, x):
@@ -1338,21 +1352,21 @@ def plot_fil(fil, fil_hi=None):
     return
 
 def plot_fil_2d(fil_lo = None, fil_hi = None, fil_2d = None, figure_name='Filter Bank 2D'):
-    fil_ll, fil_lh, fil_hl, fil_hh = None, None, None, None
+    fil_hh, fil_hl, fil_lh, fil_ll = None, None, None, None
     if fil_lo is None and fil_hi is None and fil_2d is None:
         raise ValueError('At least one of fil_lo, fil_hi or fil_conv should be provided')
 
     if fil_2d is not None:
         if isinstance(fil_2d[0], torch.Tensor):
-            fil_ll = fil_2d[0].detach().cpu()
-            fil_lh = fil_2d[1].detach().cpu()
-            fil_hl = fil_2d[2].detach().cpu()
-            fil_hh = fil_2d[3].detach().cpu()
+            fil_hh = fil_2d[0].detach().cpu()
+            fil_hl = fil_2d[1].detach().cpu()
+            fil_lh = fil_2d[2].detach().cpu()
+            fil_ll = fil_2d[3].detach().cpu()
         elif isinstance(fil_2d[0], np.ndarray or isinstance(fil_2d[0], list)):
-            fil_ll = torch.tensor(fil_2d[0])
-            fil_lh = torch.tensor(fil_2d[1])
-            fil_hl = torch.tensor(fil_2d[2])
-            fil_hh = torch.tensor(fil_2d[3])
+            fil_hh = torch.tensor(fil_2d[0])
+            fil_hl = torch.tensor(fil_2d[1])
+            fil_lh = torch.tensor(fil_2d[2])
+            fil_ll = torch.tensor(fil_2d[3])
         else:
             raise ValueError('fil_2d should be a list of tensors or numpy arrays')
     elif fil_lo is not None:
@@ -1385,27 +1399,27 @@ def plot_fil_2d(fil_lo = None, fil_hi = None, fil_2d = None, figure_name='Filter
                 raise ValueError('fil_hi should be a 1D tensor')
             fil_hi = F.normalize(fil_hi, p=2, dim=-1)
         
-        fil_ll = torch.einsum('n,m->nm', fil_lo, fil_lo)
-        fil_lh = torch.einsum('n,m->nm', fil_hi, fil_lo)
-        fil_hl = torch.einsum('n,m->nm', fil_lo, fil_hi)
-        fil_hh = torch.einsum('n,m->nm', fil_hi, fil_hi)
+        fil_hh = torch.einsum('n,m->nm', fil_lo, fil_lo)
+        fil_hl = torch.einsum('n,m->nm', fil_hi, fil_lo)
+        fil_lh = torch.einsum('n,m->nm', fil_lo, fil_hi)
+        fil_ll = torch.einsum('n,m->nm', fil_hi, fil_hi)
     
     plt.figure()
     plt.suptitle(figure_name)
     plt.subplot(2, 2, 1)
-    plt.imshow(fil_ll.numpy(), cmap='gray')
+    plt.imshow(fil_hh.numpy(), cmap='gray')
     plt.title('LL')
     plt.axis('off')
     plt.subplot(2, 2, 2)
-    plt.imshow(fil_lh.numpy(), cmap='gray')
+    plt.imshow(fil_hl.numpy(), cmap='gray')
     plt.title('LH')
     plt.axis('off')
     plt.subplot(2, 2, 3)
-    plt.imshow(fil_hl.numpy(), cmap='gray')
+    plt.imshow(fil_lh.numpy(), cmap='gray')
     plt.title('HL')
     plt.axis('off')
     plt.subplot(2, 2, 4)
-    plt.imshow(fil_hh.numpy(), cmap='gray')
+    plt.imshow(fil_ll.numpy(), cmap='gray')
     plt.title('HH')
     plt.axis('off')
     return
