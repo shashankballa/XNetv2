@@ -34,7 +34,7 @@ def init_seeds(seed):
 
 if __name__ == '__main__':
 
-    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 50 --max_bs_steps 3 --seed 1506 --nfil 1 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 7 --symnf --fbl1v2_nr 8  --fbl0 1.5 --fbl1 1.5 -ub
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 50 --max_bs_steps 4 --seed 1506 --nfil 1 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 5 --fbl1v2_nr 12  --fbl0 2.5 --fbl1 2.5 -ub
 
     parser = argparse.ArgumentParser()
 
@@ -327,7 +327,7 @@ if __name__ == '__main__':
             best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
                                                     path_trained_models, path_seg_results, cfg['PALETTE'], hyper_params_str)
             
-            if args.use_best and (bs_idx == args.max_bs_steps - 1):
+            if args.use_best and (epoch != 0) and ((bs_idx == args.max_bs_steps) or (bs_idx == 0)):
                 print('| Using best model...'.ljust(print_num_minus, ' '), '|')
                 model1.load_state_dict(copy.deepcopy(best_model.state_dict()))
             
