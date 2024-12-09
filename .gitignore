@@ -9,4 +9,7 @@ pyenv/
 
 seg_pred/
 data/
+
+# Mac
 .DS_Store
+._*

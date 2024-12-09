@@ -34,7 +34,18 @@ def init_seeds(seed):
 
 if __name__ == '__main__':
 
-    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 1 -l 2 -e 1000 -s 60  -w 40 --bs_step 50 --max_bs_steps 4 --seed 1506 --nfil 1 --nfil_step 2 --flen 2  --flen_step 2 -g 0.7 -nfl 5 --fbl1v2_nr 12  --fbl0 2.5 --fbl1 2.5 -ub
+    # first start visdom server
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 8 -l 2 -e 2000 -s 60  -w 30 --bs_step 80 --max_bs_steps 3 --seed 666666 --nfil 6 --nfil_step 2 --flen 4  --flen_step 2 -g 0.4 -nfl 5 --fbl1v2_nr 10  --fbl0 0.3 --fbl1 10 -ub --symnf -b2s
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 8 -l 2 -e 2000 -s 60  -w 30 --bs_step 50 --max_bs_steps 2 --seed 666666 --nfil 4 --nfil_step 2 --flen 4  --flen_step 2 -g 0.6 -nfl 5 --fbl1v2_nr 10  --fbl0 0.4 --fbl1 8 -ub --symnf
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 6 -l 2 -e 2000 -s 60  -w 30 --bs_step 80 --max_bs_steps 3 --seed 666666 --nfil 5 --nfil_step 4 --flen 4  --flen_step 2 -g 0.6 -nfl 7 --fbl1v2_nr 10  --fbl0 0.3 --fbl1 10 -ub --symnf -b2s
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -b 4 -l 4 -e 2000 -s 60  -w 30 --bs_step 40 --max_bs_steps 2 --seed 666666 --nfil 1 --nfil_step 5 --flen 2  --flen_step 4 -g 0.6 -nfl 5 --fbl1v2_nr 6  --fbl0 0.1 --fbl1 10 -ub --symnf -b2s
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -nfl 5 --flen 2  --flen_step 2 --nfil 1 --nfil_step 5 --fbl0 0.3 --fbl1 10 --fbl1v2_nr 6 --symnf  -b 4 -l 4 -e 2000 -s 40 -g 0.6 -w 30 --bs_step 50 --max_bs_steps 2 --seed 666 -b2s -ub
+
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -nfl 5 --flen 2  --flen_step 2 --nfil 1 --nfil_step 5 --fbl0 0.3 --fbl1 10 --fbl1v2_nr 6 --symnf  -b 8 -l 4 -e 2000 -s 40 -g 0.8 -w 30 --bs_step 50 --max_bs_steps 1 -b2s -ub 20 --seed 666
 
     parser = argparse.ArgumentParser()
 
@@ -62,7 +73,7 @@ if __name__ == '__main__':
     parser.add_argument('--max_bs_steps', default=3, type=int, help='maximum number of batch size steps')
     parser.add_argument('-b2s', '--big2small', action='store_true', default=False, help='batch size big to small')
 
-    parser.add_argument('-ub', '--use_best', action='store_true', default=False, help='use best model')
+    parser.add_argument('-ub', '--use_best', default=1, help='number of epochs to bootstrap')
     # parser.add_argument('--threshold', default=0.5, type=float)
 
     parser.add_argument('-nfl', '--nflens', default=4, type=int, help='number of filter lengths')
@@ -103,7 +114,7 @@ if __name__ == '__main__':
     
     train_prm_str = '-l=' + str(args.lr) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + '-w=' + str(args.warm_up_duration) + \
             '-e=' + str(args.num_epochs) + '-b=' + str(args.batch_size) + '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + \
-                '-b2s' * args.big2small + '-ub' * args.use_best + '-sd=' + str(args.seed) \
+                '-b2s' * args.big2small + '-ub=' + str(args.use_best) + '-sd=' + str(args.seed) \
     
     hyper_params_str = model_prm + train_prm_str
                                 
@@ -327,7 +338,8 @@ if __name__ == '__main__':
             best_val_eval_list, best_model = save_val_sup_2d_best_model(cfg['NUM_CLASSES'], best_val_eval_list, model1, best_model, score_list_val1, name_list_val, val_eval_list1, 
                                                     path_trained_models, path_seg_results, cfg['PALETTE'], hyper_params_str)
             
-            if args.use_best and (epoch != 0) and ((bs_idx == args.max_bs_steps) or (bs_idx == 0)):
+            if (args.use_best > 0) and (epoch % args.use_best == 0):# and (epoch != 0) and ((bs_idx == args.max_bs_steps) or (bs_idx == args.max_bs_steps - 1)):
+                print('-' * print_num)
                 print('| Using best model...'.ljust(print_num_minus, ' '), '|')
                 model1.load_state_dict(copy.deepcopy(best_model.state_dict()))
             

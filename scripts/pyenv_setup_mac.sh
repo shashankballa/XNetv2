@@ -1,3 +1,9 @@
+
+source ~/.bash_profile
+find . -name "._*" -type f -delete
+find . -name ".DS_*" -type f -delete
+find . -name "__pycache__" -type f -delete
+
 if [[ "$*" == *"--rebuild"* ]]; then
     echo -e "Rebuilding the environment"
     .pyenv/bin/pip3 install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cpu
@@ -13,3 +19,8 @@ fi
 .pyenv/bin/python -c "import torch; print('Torch version:', torch.__version__); print('MPS available:', torch.backends.mps.is_available())"
 
 #windows: pip install --pre torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu117 --no-cache-dir
+
+# Clear all irrelevant Mac files
+find . -name "._*" -type f -delete
+find . -name ".DS_*" -type f -delete
+find . -name "__pycache__" -type f -delete

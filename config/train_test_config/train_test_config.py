@@ -213,7 +213,7 @@ def save_val_sup_2d_best_model(num_classes, best_list, model, best_model, score_
     elif best_list[2] < eval_list[2]:
         # Update best Dice
         best_list[2] = eval_list[2]
-        best_model.load_state_dict(copy.deepcopy(model.state_dict()))
+        # best_model.load_state_dict(copy.deepcopy(model.state_dict()))
 
         # Save the best model based on Dice
         torch.save(model.state_dict(), os.path.join(path_trained_model, f'Dc_{best_list[2]:.6f}_{model_name}.pth'))
