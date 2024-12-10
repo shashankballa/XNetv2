@@ -121,4 +121,32 @@ def vis_filter_bank_WaveNetX(vis, fil_lo = None, fil_hi = None, fb_2d_list = Non
     # visualize in 2 x 2 grid
     vis.images([fil_ll.unsqueeze(0), fil_lh.unsqueeze(0), fil_hl.unsqueeze(0), fil_hh.unsqueeze(0)], nrow=2, win=figure_name, opts=dict(title=figure_name))
 
+# WaveNetX4
+
+def vis_init_WaveNetX4(env, port):
+    visdom = Visdom(env=env, port=port)
+    visdom.line([[0., 0., 0., 0., 0., 0.]], [0.], win='loss', opts=dict(title='Loss', xlabel='Epoch', ylabel='Loss', legend=['Train Total', 'Train Sup', 'Train FBL0', 'Train FBL1', 'Val Sup', 'Best Val sup'], width=550, height=350))
+    visdom.line([[0., 0., 0., 0., 0., 0.]], [0.], win='scores', opts=dict(title='Scores', xlabel='Epoch', ylabel='Score', legend=['Train Jc', 'Train Dice', 'Val Jc', 'Val Dice', 'Best Jc', 'Best Dice'], width=550, height=350))
+    return visdom
+
+def vis_WaveNetX4(vis, epoch, train_loss, train_loss_sup1, train_loss_sup2, train_loss_sup3, train_m_jc1, train_m_dc1, val_loss_sup1, val_m_jc1, val_m_dc1, best_val_loss, best_val_jc, best_val_dc):
+    vis.line([[train_loss, train_loss_sup1, train_loss_sup2, train_loss_sup3, val_loss_sup1, best_val_loss]], [epoch], win='loss', update='append')
+    vis.line([[train_m_jc1, train_m_dc1, val_m_jc1, val_m_dc1, best_val_jc, best_val_dc]], [epoch], win='scores', update='append')
+
+
+def vis_image_WaveNetX4(vis, mask_train, pred_train, mask_val, pred_val, pred_best_val, stich_img=False):
+
+    if not stich_img:
+        vis.heatmap(mask_train, win='train_mask', opts=dict(title='Train Mask', colormap='Viridis'))
+        vis.heatmap(pred_train, win='train_pred1', opts=dict(title='Train Pred', colormap='Viridis'))
+        vis.heatmap(mask_val, win='val_mask', opts=dict(title='Val Mask', colormap='Viridis'))
+        vis.heatmap(pred_val, win='val_pred1', opts=dict(title='Val Pred', colormap='Viridis'))
+        vis.heatmap(pred_best_val, win='best_val_pred', opts=dict(title='Best Val Pred', colormap='Viridis'))
+    else:
+        # visualize mask and pred together in 1 X 2 grid
+        vis.images([mask_train, pred_train], nrow=1, win='train_mask_pred', opts=dict(title='Train Mask and Pred'))
+        # visualize mask and pred together in 1 X 3 grid
+        vis.images([mask_val, pred_val, pred_best_val], nrow=1, win='val_mask_pred', opts=dict(title='Val Mask, Pred and Best Pred'))
+
+
     

@@ -12,6 +12,7 @@ import time
 import os
 import numpy as np
 import random
+import copy
 from PIL import Image
 from config.dataset_config.dataset_cfg import dataset_cfg
 from config.augmentation.online_aug import data_transform_2d, data_normalize_2d
@@ -104,6 +105,16 @@ if __name__ == '__main__':
                             '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
     os.makedirs(path_trained_models, exist_ok=True)
 
+    # Save the args in a text file in the trained model directory
+    arg_fname = args.network + '_args' +  '-l=' + str(args.lr) + \
+            '-e=' + str(args.num_epochs) + '-s=' + str(args.step_size) + '-g=' + str(args.gamma) + \
+                '-b=' + str(args.batch_size) + '-w=' + str(args.warm_up_duration) + \
+                    '-nf=' + str(args.nfil) + '-fl=' + str(args.flen) + '-nfs=' + str(args.nfil_step) + '-fls=' + str(args.flen_step) + \
+                        '-bs=' + str(args.bs_step_size) + '-mbs=' + str(args.max_bs_steps) + '-sd=' + str(args.seed) + \
+                            '-fbl0=' + str(args.fbl0) + '-fbl1=' + str(args.fbl1) + args.big2small * '-b2s'
+    with open(path_trained_models + '/' + arg_fname + '.txt', 'w') as f:
+        f.write(str(args))
+
     # Segmentation results save
     path_seg_results = cfg['PATH_SEG_RESULT'] + '/' + str(dataset_name)
     os.makedirs(path_seg_results, exist_ok=True)
@@ -180,7 +191,14 @@ if __name__ == '__main__':
     since = time.time()
     count_iter = 0
 
-    best_model = model1
+
+    best_model_weights = copy.deepcopy(model1.state_dict())
+    best_model = get_network(args.network, cfg['IN_CHANNELS'], cfg['NUM_CLASSES'], 
+                            nfil=args.nfil, flen=args.flen, # WaveNetXv0 and WaveNetXv1
+                            nfil_start=args.nfil, flen_start=args.flen, flen_step=args.flen_step, nfil_step=args.nfil_step # WaveNetXv2
+                            ).to(device)
+    best_model.load_state_dict(best_model_weights)
+    
     best_result = 'Result1'
     best_val_eval_list = [0 for i in range(4)]
 
@@ -274,6 +292,7 @@ if __name__ == '__main__':
         # Validation loop
         with torch.no_grad():
             model1.eval()
+            best_model.eval()
             for i, data in enumerate(dataloaders['val']):
 
                 inputs_val1 = Variable(data['image'].to(device))

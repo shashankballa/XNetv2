@@ -241,17 +241,28 @@ class DWT_mtap(nn.Module):
             _fb_hl = torch.einsum('nf,ng->nfg', fb_lo, fb_hi)
             _fb_hh = torch.einsum('nf,ng->nfg', fb_hi, fb_hi)
 
+            _padval = 0
             if not for_vis:
                 _fb_ll = _fb_ll.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_lh = _fb_lh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_hl = _fb_hl.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
                 _fb_hh = _fb_hh.view(_nfil, 1, _flen, _flen).repeat(inp_channels, 1, 1, 1)
+            else:
+                # map tp [0, 1] for visualization
+                _max = torch.max(torch.tensor([_fb_hh.max(), _fb_hl.max(), _fb_lh.max(), _fb_ll.max()]))
+                _min = torch.min(torch.tensor([_fb_hh.min(), _fb_hl.min(), _fb_lh.min(), _fb_ll.min()]))
+                _maxx = torch.max(torch.tensor([_max.abs(), _min.abs()]))
+                _fb_hh = (_fb_hh/_maxx + 1) / 2
+                _fb_hl = (_fb_hl/_maxx + 1) / 2
+                _fb_lh = (_fb_lh/_maxx + 1) / 2
+                _fb_ll = (_fb_ll/_maxx + 1) / 2
+                _padval = 0.5
 
             pads = [(self.flen_max - _fb_lo.shape[1]) // 2] * 4
-            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=0)
-            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=0)
-            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=0)
-            _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=0)
+            _fb_hh = F.pad(_fb_hh, pads, mode='constant', value=_padval)
+            _fb_hl = F.pad(_fb_hl, pads, mode='constant', value=_padval)
+            _fb_lh = F.pad(_fb_lh, pads, mode='constant', value=_padval)
+            _fb_ll = F.pad(_fb_ll, pads, mode='constant', value=_padval)
 
             fb_ll.append(_fb_ll)
             fb_lh.append(_fb_lh)
@@ -288,7 +299,7 @@ class DWT_mtap(nn.Module):
         f_idx = 0
         for _fb_lo in self.get_fb_lo_list():
             # Normalize the filter bank rows
-            fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
+            _fb_lo = F.normalize(_fb_lo, p=2, dim=-1)
 
             # Compute Gram matrix: G = W * W^T
             gram_matrix = _fb_lo @ _fb_lo.T
