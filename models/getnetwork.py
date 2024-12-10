@@ -2,7 +2,9 @@ import sys
 from models import *
 import torch.nn as nn
 
-def get_network(network, in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, *args, **kwargs):
+def get_network(network, in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4, nfil_start=4, flen_step=4, nfil_step=4, nflens=NFLENS,
+                fbl1_nrows=8, symm_nfils = True,
+                 *args, **kwargs):
 
     # 2d networks
     if network == 'unet':
@@ -23,7 +25,8 @@ def get_network(network, in_channels, num_classes, version=1, flen=8, nfil=16, f
     elif network.lower() == 'wavenetxv1':
         net = wavenetx(in_channels, num_classes, version=1, flen=flen, nfil=nfil)
     elif network.lower() == 'wavenetxv2':
-        net = wavenetx(in_channels, num_classes, version=2, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step)
+        net = wavenetxv2(in_channels, num_classes, nflens=nflens, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, 
+                       symm_nfils=symm_nfils, fbl1_nrows=fbl1_nrows)
 
     else:
         print('the network you have entered is not supported yet')

@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from models.getnetwork import get_network
+from models.getnetwork import get_network, NFLENS
 from models.networks_2d.WaveNetX import latest_ver
 import argparse
 import time

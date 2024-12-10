@@ -5,7 +5,7 @@ import torch.optim as optim
 from torch.optim import lr_scheduler
 from torch.autograd import Variable
 from torch.utils.data import DataLoader
-from models.getnetwork import get_network
+from models.getnetwork import get_network, NFLENS
 from models.networks_2d.WaveNetX import latest_ver
 import argparse
 import time
@@ -34,8 +34,12 @@ def init_seeds(seed):
 
 if __name__ == '__main__':
 
-    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -l 2.0 -e 2000 -s 80 -g 0.7 -b 8 -w 40 --nfil 9 --flen 6 --nfil_step -1 --flen_step 2 --bs_step 100 --max_bs_steps 2 --seed 666666 --fbl0 0.01 --fbl1 0.001 -b2s -ub 0 -nfl 8
+    # bash scripts/run_py.sh mac_train_WaveNetXv4.py -l 2.0 -e 2000 -s 80 -g 0.7 -b 8 -w 40 --nfil 9 --flen 6 --nfil_step -1 --flen_step 2 --bs_step 100 --max_bs_steps 2 --seed 666666 --fbl0 0.01 --fbl1 0.1 -b2s -ub 0 -nfl 8
     # bash scripts/run_py.sh mac_train_WaveNetXv4.py -l 2.0 -e 2000 -s 80 -g 0.7 -b 4 -w 40 --nfil 7 --flen 6 --nfil_step -1 --flen_step 2 --bs_step 100 --max_bs_steps 3 --seed 666666 --fbl0 0.1 --fbl1 0.01 -b2s -ub 80
+
+    # 12/10 10:06 | 1000e|  bash scripts/run_py.sh mac_train_WaveNetXv4.py -l 2.0 -e 2000 -s 80 -g 0.7 -b 4 -w 40 --nfil 8 --flen 6 --nfil_step -1 --flen_step 2 --bs_step 100 --max_bs_steps 3 --seed 666666 --fbl0 0.1 --fbl1 0.1 -b2s -ub 80 -t4s
+
+    # 12/10 10:06 | bash scripts/run_py.sh mac_train_WaveNetXv4.py -l 2.0 -e 2000 -s 80 -g 0.7 -b 4 -w 40 -nfl 7 --nfil 7 --flen 6 --nfil_step -1 --flen_step 2 --bs_step 100 --max_bs_steps 3 --seed 666666 --fbl0 0.3 --fbl1 0.3 -b2s -ub 80 -t4v
 
     parser = argparse.ArgumentParser()
 
@@ -67,7 +71,7 @@ if __name__ == '__main__':
     parser.add_argument('-t4v','--test4val', action='store_true', default=False, help='use test set for validation')
     # parser.add_argument('--threshold', default=0.5, type=float)
 
-    parser.add_argument('-nfl', '--nflens', default=4, type=int, help='number of filter lengths')
+    parser.add_argument('-nfl', '--nflens', default=NFLENS, type=int, help='number of filter lengths')
     parser.add_argument('--nfil', default=4, type=int, help='number of filters for smallest filter length in the DWT layer')
     parser.add_argument('--nfil_step', default=4, type=int, help='number of filters step size in the DWT layer')
     parser.add_argument('--symnf', action='store_true', default=False, help='use symmetric number of filters in the DWT layer: increase and decrease')
@@ -270,19 +274,18 @@ if __name__ == '__main__':
             mask_train_sup = Variable(sup_index['bin_mask'].to(device).long())
             loss_train_sup1, loss_train_sup2, loss_train_sup3 = 0, 0, 0
 
-
             pred_train_sup1 = model1(img_train_sup)
+
             loss_train_sup1 = criterion(pred_train_sup1, mask_train_sup)
             train_loss_sup_1 += loss_train_sup1.item()
-            loss_train_sup = loss_train_sup1
 
             loss_train_sup2 = model1.dwt.get_fb_hi_0_mean_loss() * fb_l0
             train_loss_sup_2 += loss_train_sup2.item()
-            loss_train_sup += loss_train_sup2
 
             loss_train_sup3 = model1.dwt.get_fb_lo_orthnorm_loss() * fb_l1
             train_loss_sup_3 += loss_train_sup3.item()
-            loss_train_sup += loss_train_sup3
+
+            loss_train_sup = loss_train_sup1 + loss_train_sup2 + loss_train_sup3
 
             loss_train_sup.backward()
 
