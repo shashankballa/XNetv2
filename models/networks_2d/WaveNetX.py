@@ -972,6 +972,7 @@ def wavenetx(in_channels, num_classes, version=1, flen=8, nfil=16, flen_start=4,
     elif version == 1:
         model = WaveNetXv1(in_channels, num_classes, flen=flen, nfil=nfil)
     elif version == 2:
+        print(flen_start,nfil_start,flen_step,nfil_step,nflens)
         model = WaveNetXv2(in_channels, num_classes, flen_start=flen_start, nfil_start=nfil_start, flen_step=flen_step, nfil_step=nfil_step, nflens=nflens)
     init_weights(model, 'kaiming')
     return model
